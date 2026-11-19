@@ -76,9 +76,11 @@ import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/selling.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/access_pay_card.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/collapsing_tab_shell.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/deadline_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/fantasy_league_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_walkthrough.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboards_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/live_logic.dart';
@@ -109,6 +111,44 @@ MaterialPageRoute<void> fantasyHubPageRoute(FantasyHubRoute route) =>
         initialPlayerName: route.initialPlayerName,
       ),
     );
+
+/// The in-app "open Fantasy" entry (the game page's Fantasy tab, a fantasy
+/// player profile's "Open in Fantasy", the Infinite profile's Fantasy tab, the
+/// league page's Fantasy tab). When a Hub for the same sport + season is
+/// already open below on [context]'s navigator, goes BACK to it (popping what
+/// is above it) instead of stacking a second Hub — a second Hub would own a
+/// second squad draft, whose unsaved picks could overwrite a save made in the
+/// first. A named player's profile then opens through that Hub's own opener
+/// (with its shared draft); its current tab never changes, and
+/// `route.focusPostId` is ignored on this return branch. Otherwise pushes
+/// [routeFor] (default [fantasyHubPageRoute]).
+void openFantasyHub(
+  BuildContext context,
+  FantasyHubRoute route, {
+  Route<void> Function(FantasyHubRoute route)? routeFor,
+}) {
+  final navigator = Navigator.of(context);
+  final hub =
+      _FantasyHubPageState._openHubFor(route.sport, route.season, navigator);
+  if (hub == null) {
+    navigator.push((routeFor ?? fantasyHubPageRoute)(route));
+    return;
+  }
+  final hubRoute = hub._route!;
+  navigator.popUntil((r) => identical(r, hubRoute));
+  final name = route.initialPlayerName;
+  if (name != null) {
+    // Deferred: a profile the Hub had open is popped by the popUntil above
+    // but its opener only clears `_openingPlayer` in a later microtask, so
+    // opening now would be dropped. By the next frame the flag has cleared
+    // (same pattern as [_openPendingPlayer]).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (hub.mounted) hub._openPlayerProfile(name);
+    });
+    // Make sure that frame happens even if nothing else schedules one.
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+}
 
 class FantasyHubPage extends StatefulWidget {
   const FantasyHubPage({
@@ -144,6 +184,8 @@ class FantasyHubPage extends StatefulWidget {
     this.historyWeekFor,
     this.publishedPicksFor,
     this.overallStandingStates,
+    this.playerTotalsStates,
+    this.leagueSeams,
   });
 
   final String sport;
@@ -221,7 +263,7 @@ class FantasyHubPage extends StatefulWidget {
 
   /// Replaces `FantasyService.submitAccessClaim` ("I sent it").
   final Future<void> Function(
-      FantasyAccessMethod method, double amountDollars, String note)?
+          FantasyAccessMethod method, double amountDollars, String note)?
       submitAccessClaim;
 
   /// Replaces the signed-in user's display name (the claim note's tail).
@@ -245,11 +287,51 @@ class FantasyHubPage extends StatefulWidget {
   /// Replaces `FantasyService.watchOverallStanding` (the official rank).
   final Stream<OverallStanding?>? overallStandingStates;
 
+  /// Forwarded to the Players tab (replaces `FantasyService.watchPlayerTotals`).
+  final Stream<Map<String, FantasyPlayerTotals>?>? playerTotalsStates;
+
+  /// Test seams forwarded to the League tab (null = production).
+  final FantasyLeagueSeams? leagueSeams;
+
   @override
   State<FantasyHubPage> createState() => _FantasyHubPageState();
 }
 
 class _FantasyHubPageState extends State<FantasyHubPage> {
+  /// Every mounted Hub, oldest first (see [openFantasyHub]). Routes are
+  /// compared by identity, never by name.
+  static final List<_FantasyHubPageState> _open = [];
+
+  /// The newest registered Hub for [sport] + [season] whose own route is
+  /// active and belongs to [navigator], or null.
+  static _FantasyHubPageState? _openHubFor(
+      String sport, String season, NavigatorState navigator) {
+    for (final hub in _open.reversed) {
+      final route = hub._route;
+      if (route != null &&
+          hub.mounted &&
+          hub.widget.sport == sport &&
+          hub.widget.season == season &&
+          route.isActive &&
+          identical(route.navigator, navigator)) {
+        return hub;
+      }
+    }
+    return null;
+  }
+
+  /// This Hub's own route (captured once, in [didChangeDependencies]).
+  ModalRoute<dynamic>? _route;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_route == null) {
+      _route = ModalRoute.of(context);
+      if (_route != null) _open.add(this);
+    }
+  }
+
   /// Config → schedule gameweeks → the signed-in manager's finalized chips
   /// by gameweek (`History/<gw>/<uid>`, one small listener per schedule
   /// gameweek) — the shared wiring (fantasy_schedule_feed.dart): lock-hour
@@ -316,8 +398,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
 
   FantasyConfigState? get _configState => _schedule.config;
   List<Gameweek> get _gameweeks => _schedule.gameweeks ?? const [];
-  Map<int, ChipHistoryEntry> get _chipHistory =>
-      _schedule.weekData ?? const {};
+  Map<int, ChipHistoryEntry> get _chipHistory => _schedule.weekData ?? const {};
   bool get _chipsLoaded => _schedule.weekLoaded;
 
   List<FantasyPlayer>? _players;
@@ -417,6 +498,16 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   /// And for the My Team pay card (paid access).
   final StreamController<FantasyAccessState> _accessForTabs =
       StreamController<FantasyAccessState>.broadcast();
+
+  /// The header's ONE deadline tick (release report #8): the big countdown
+  /// and the collapsed bar's slim line both read it — never a second timer.
+  /// The tabs' primary scroll controller, also put above the Scaffold (the
+  /// iOS status-bar tap's source): a scroll-to-top moves only the tab on
+  /// screen, never every kept-alive tab (review 6, M-c).
+  final ActiveTabScrollController _primaryScroll = ActiveTabScrollController();
+
+  late final FantasyDeadlineClock _deadlineClock =
+      FantasyDeadlineClock(nowUtc: widget.nowUtc);
 
   StreamSubscription<List<FantasyPlayer>>? _playersSub;
   StreamSubscription<FantasyManager?>? _managerSub;
@@ -757,7 +848,9 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     final gws = _schedule.gameweeks;
     final players = _players;
     final editingGw = saleEditingGameweek(
-      gameweeks: gws,
+      // A schedule that failed to load is unknown, never "GW1" (review 6,
+      // I2): the draft's money then stays not-ready.
+      gameweeks: _schedule.scheduleUnknown ? null : gws,
       lockOverride: _configState?.lockOverride ?? FantasyLockOverride.auto,
       baseline: _sale?.baseline,
       nowUtc: now,
@@ -767,8 +860,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
       currentPrices: players == null
           ? null
           : {for (final p in players) p.name: p.priceTenths},
-      lastWeekPrices:
-          editingGw == null ? null : _priceHistory?[editingGw - 1],
+      lastWeekPrices: editingGw == null ? null : _priceHistory?[editingGw - 1],
       editingGw: editingGw,
     );
     draft.setTransferContext(
@@ -830,6 +922,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
 
   @override
   void dispose() {
+    _open.remove(this);
     _schedule.dispose();
     _playersSub?.cancel();
     _managerSub?.cancel();
@@ -849,6 +942,8 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     _squadForTabs.close();
     _alertForTabs.close();
     _accessForTabs.close();
+    _deadlineClock.dispose();
+    _primaryScroll.dispose();
     _draft?.dispose();
     super.dispose();
   }
@@ -940,7 +1035,16 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         // A failed History read is UNKNOWN (null), never "nothing used": it
         // holds arming of Wildcard / Free Hit (a spent one would be voided
         // at the lock and every transfer charged).
-        chipHistory: _schedule.weekUnknown ? null : _chipHistory,
+        // A failed schedule read is unknown too: no weeks were listened to,
+        // so the empty history says nothing (review 6, I2).
+        chipHistory: _schedule.weekUnknown || _schedule.scheduleUnknown
+            ? null
+            : _chipHistory,
+        scheduleUnknown: _schedule.scheduleUnknown,
+        // Given up retrying (re-review 6b, item 2): "Try again" restarts it.
+        onRetrySchedule: _schedule.scheduleRetry == FantasyFeedRetry.gaveUp
+            ? _schedule.restart
+            : null,
         voidedWeeks: _voidedWeeks,
         lockedWeek: _lockedModel(),
         // The banner's live line: from the live feed the locked-week streams
@@ -964,17 +1068,24 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         onOpenPlayer: _openPlayerProfile,
         newsStates: widget.newsStates,
         leaderboardsFeeds: widget.leaderboardsFeeds,
+        playerTotalsStates: widget.playerTotalsStates,
+        leagueSeams: widget.leagueSeams,
+        deadlineClock: _deadlineClock,
+        primaryScroll: _primaryScroll,
       );
     } else {
       body = const _HubSkeleton(key: ValueKey('skeleton'));
     }
-    return Scaffold(
-      appBar: AppBar(title: const Text('Infinite Fantasy')),
-      // Single fade reveal: skeleton until config+players+manager have ALL
-      // arrived, then the whole hub fades in at once.
-      body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 300),
-        child: body,
+    return PrimaryScrollController(
+      controller: _primaryScroll,
+      child: Scaffold(
+        appBar: AppBar(title: const Text('Infinite Fantasy')),
+        // Single fade reveal: skeleton until config+players+manager have ALL
+        // arrived, then the whole hub fades in at once.
+        body: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 300),
+          child: body,
+        ),
       ),
     );
   }
@@ -1034,9 +1145,30 @@ class _HubBody extends StatelessWidget {
     required this.focusPostId,
     required this.onFocusHandled,
     required this.onOpenPlayer,
+    required this.deadlineClock,
+    required this.scheduleUnknown,
+    required this.onRetrySchedule,
+    required this.primaryScroll,
     this.newsStates,
     this.leaderboardsFeeds,
+    this.playerTotalsStates,
+    this.leagueSeams,
   });
+
+  /// The hub's one deadline tick, shared by both header faces.
+  final FantasyDeadlineClock deadlineClock;
+
+  /// The schedule read failed ([gameweeks] is empty for that reason only):
+  /// the deadline faces, My Team and the market say so instead of "Season
+  /// complete" / "Locked" (review 6, I2).
+  final bool scheduleUnknown;
+
+  /// Non-null once the schedule feed has GIVEN UP retrying: every unknown
+  /// face says so plainly and offers "Try again" (this restarts the reads).
+  final VoidCallback? onRetrySchedule;
+
+  /// The tabs' primary scroll controller (see [ActiveTabScrollController]).
+  final ActiveTabScrollController primaryScroll;
 
   final String sport;
   final String season;
@@ -1097,134 +1229,161 @@ class _HubBody extends StatelessWidget {
   /// Test seams forwarded to the Leaderboards tab (null = the real feeds).
   final FantasyLeaderboardsFeeds? leaderboardsFeeds;
 
+  /// Test seam forwarded to the Players tab (null = the real feed).
+  final Stream<Map<String, FantasyPlayerTotals>?>? playerTotalsStates;
+
+  /// Test seams forwarded to the League tab (null = production).
+  final FantasyLeagueSeams? leagueSeams;
+
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 5,
+    // Release report #8: the header shrinks to a slim pinned bar once the
+    // active tab scrolls; the deadline stays on screen in both faces.
+    return CollapsingTabShell(
       initialIndex: initialTab.index,
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-            child: FantasyBanner(
-              subtitle: '$sport · Season $season',
-              teamName: manager?.teamName,
-              liveLine: liveLine,
-              onEditTeamName: manager == null
-                  ? null
-                  : () => showTeamNameDialog(
-                        context,
-                        initialName: manager!.teamName,
-                        onSave: saveTeamName,
-                      ),
-              // FPL-style live countdown (P3b Task 4): ticking D/H/M/S boxes
-              // while the gameweek is open under the auto lock; the override
-              // and locked states keep their chips.
-              bottom: FantasyDeadlineCountdown(
-                gameweeks: gameweeks,
-                lockOverride: configState.lockOverride,
-              ),
-            ),
+      primaryScrollController: primaryScroll,
+      tabs: const [
+        'My Team',
+        'Players',
+        'League',
+        'Leaderboards',
+        'News',
+        'Rules',
+      ],
+      expandedHeader: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+        child: FantasyBanner(
+          subtitle: '$sport · Season $season',
+          teamName: manager?.teamName,
+          liveLine: liveLine,
+          onEditTeamName: manager == null
+              ? null
+              : () => showTeamNameDialog(
+                    context,
+                    initialName: manager!.teamName,
+                    onSave: saveTeamName,
+                  ),
+          // FPL-style live countdown (P3b Task 4): ticking D/H/M/S boxes
+          // while the gameweek is open under the auto lock; the override
+          // and locked states keep their chips.
+          bottom: FantasyDeadlineCountdown(
+            gameweeks: gameweeks,
+            lockOverride: configState.lockOverride,
+            clock: deadlineClock,
+            scheduleUnknown: scheduleUnknown,
+            onRetry: onRetrySchedule,
           ),
-          TabBar(
-            isScrollable: true,
-            tabAlignment: TabAlignment.start,
-            tabs: const [
-              Tab(text: 'My Team'),
-              Tab(text: 'Players'),
-              Tab(text: 'Leaderboards'),
-              Tab(text: 'News'),
-              Tab(text: 'Rules'),
-            ],
-          ),
-          Expanded(
-            child: TabBarView(
-              children: [
-                // Name prompt / moderation gate / court squad builder — all
-                // stream-driven (spec §10b, P3b).
-                FantasyMyTeamTab(
-                  managerStates: managerStates,
-                  initialManager: manager,
-                  onSaveName: saveTeamName,
-                  configState: configState,
-                  players: players,
-                  gameweeks: gameweeks,
-                  squadStates: squadStates,
-                  initialSquad: squad,
-                  onSaveSquad: saveSquad,
-                  draft: draft,
-                  alertStates: alertStates,
-                  initialAlert: alert,
-                  chipHistory: chipHistory,
-                  voidedWeeks: voidedWeeks,
-                  lockedWeek: lockedWeek,
-                  onOpenPlayer: onOpenPlayer,
-                  // Paid access (spec 2026-11-01 §5): the pay card in pass
-                  // mode until this fan's record is active.
-                  sport: sport,
-                  season: season,
-                  accessConfig: configState.access,
-                  accessStates: accessStates,
-                  initialAccess: access,
-                  accessActions: accessActions,
-                  displayName: displayName,
-                ),
-                // The market (P3c) — edits the SAME shared draft as above;
-                // saving stays on My Team.
-                FantasyPlayersTab(
-                  sport: sport,
-                  season: season,
-                  players: players,
-                  draft: draft,
-                  lockOverride: configState.lockOverride,
-                  gameweeks: gameweeks,
-                ),
-                // Overall/gameweek standings, mini-leagues and the manager
-                // squad viewer (P3d, spec §9/§10).
-                FantasyLeaderboardsTab(
-                  sport: sport,
-                  season: season,
-                  configState: configState,
-                  players: players,
-                  gameweeks: gameweeks,
-                  squadStates: squadStates,
-                  initialSquad: squad,
-                  leaderboardsStates: leaderboardsFeeds?.leaderboardsStates,
-                  managersStates: leaderboardsFeeds?.managersStates,
-                  miniLeaguesStates: leaderboardsFeeds?.miniLeaguesStates,
-                  dreamTeamsStates: leaderboardsFeeds?.dreamTeamsStates,
-                  loadProfiles: leaderboardsFeeds?.loadProfiles,
-                  selfUidOverride: leaderboardsFeeds?.selfUidOverride,
-                  viewerPublishedStates:
-                      leaderboardsFeeds?.viewerPublishedStates,
-                  viewerHistoryStates: leaderboardsFeeds?.viewerHistoryStates,
-                  shareImage: leaderboardsFeeds?.shareImage,
-                  badgesStates: leaderboardsFeeds?.badgesStates,
-                  onOpenPlayer: onOpenPlayer,
-                ),
-                // Published league news (P3d) with tagged-player cards and
-                // push-tap focus (News desk 2.0).
-                FantasyNewsTab(
-                  sport: sport,
-                  season: season,
-                  newsStates: newsStates,
-                  focusPostId: focusPostId,
-                  onFocusHandled: onFocusHandled,
-                  onOpenPlayer: onOpenPlayer,
-                ),
-                // Rendered ENTIRELY from the live config (spec §10a): a
-                // tuned value re-renders this page by itself.
-                FantasyRulesTab(
-                  configStates: configStates,
-                  initialState: configState,
-                  gameweeks: gameweeks,
-                ),
-              ],
-            ),
-          ),
-        ],
+        ),
       ),
+      collapsedHeader: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+        child: Container(
+          key: const ValueKey('fantasy_hub_slim_bar'),
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: FantasyBanner.cardDecoration(context, radius: 14),
+          child: FantasyDeadlineSlimLine(
+            gameweeks: gameweeks,
+            lockOverride: configState.lockOverride,
+            clock: deadlineClock,
+            scheduleUnknown: scheduleUnknown,
+            onRetry: onRetrySchedule,
+          ),
+        ),
+      ),
+      children: [
+        // Name prompt / moderation gate / court squad builder — all
+        // stream-driven (spec §10b, P3b).
+        FantasyMyTeamTab(
+          managerStates: managerStates,
+          initialManager: manager,
+          onSaveName: saveTeamName,
+          configState: configState,
+          players: players,
+          gameweeks: gameweeks,
+          scheduleUnknown: scheduleUnknown,
+          onRetrySchedule: onRetrySchedule,
+          squadStates: squadStates,
+          initialSquad: squad,
+          onSaveSquad: saveSquad,
+          draft: draft,
+          alertStates: alertStates,
+          initialAlert: alert,
+          chipHistory: chipHistory,
+          voidedWeeks: voidedWeeks,
+          lockedWeek: lockedWeek,
+          onOpenPlayer: onOpenPlayer,
+          // Paid access (spec 2026-11-01 §5): the pay card in pass
+          // mode until this fan's record is active.
+          sport: sport,
+          season: season,
+          accessConfig: configState.access,
+          accessStates: accessStates,
+          initialAccess: access,
+          accessActions: accessActions,
+          displayName: displayName,
+        ),
+        // The market (P3c) — edits the SAME shared draft as above;
+        // saving stays on My Team.
+        FantasyPlayersTab(
+          sport: sport,
+          season: season,
+          players: players,
+          draft: draft,
+          lockOverride: configState.lockOverride,
+          gameweeks: gameweeks,
+          scheduleUnknown: scheduleUnknown,
+          scheduleGaveUp: onRetrySchedule != null,
+          totalsStates: playerTotalsStates,
+        ),
+        // The league's fixtures and table, like the league page's own.
+        FantasyLeagueTab(
+          sport: sport,
+          season: season,
+          seams: leagueSeams ?? const FantasyLeagueSeams(),
+        ),
+        // Overall/gameweek standings, mini-leagues and the manager
+        // squad viewer (P3d, spec §9/§10).
+        FantasyLeaderboardsTab(
+          sport: sport,
+          season: season,
+          configState: configState,
+          players: players,
+          gameweeks: gameweeks,
+          squadStates: squadStates,
+          initialSquad: squad,
+          leaderboardsStates: leaderboardsFeeds?.leaderboardsStates,
+          managersStates: leaderboardsFeeds?.managersStates,
+          miniLeaguesStates: leaderboardsFeeds?.miniLeaguesStates,
+          dreamTeamsStates: leaderboardsFeeds?.dreamTeamsStates,
+          loadProfiles: leaderboardsFeeds?.loadProfiles,
+          selfUidOverride: leaderboardsFeeds?.selfUidOverride,
+          viewerPublishedStates: leaderboardsFeeds?.viewerPublishedStates,
+          viewerHistoryStates: leaderboardsFeeds?.viewerHistoryStates,
+          shareImage: leaderboardsFeeds?.shareImage,
+          badgesStates: leaderboardsFeeds?.badgesStates,
+          onOpenPlayer: onOpenPlayer,
+        ),
+        // Published league news (P3d) with tagged-player cards and
+        // push-tap focus (News desk 2.0).
+        FantasyNewsTab(
+          sport: sport,
+          season: season,
+          newsStates: newsStates,
+          focusPostId: focusPostId,
+          onFocusHandled: onFocusHandled,
+          onOpenPlayer: onOpenPlayer,
+        ),
+        // Rendered ENTIRELY from the live config (spec §10a): a
+        // tuned value re-renders this page by itself.
+        FantasyRulesTab(
+          configStates: configStates,
+          initialState: configState,
+          gameweeks: gameweeks,
+          scheduleUnknown: scheduleUnknown,
+          onRetrySchedule: onRetrySchedule,
+        ),
+      ],
     );
   }
 }
-

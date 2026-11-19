@@ -1,8 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:infinite_sports_flutter/misc/share_card_service.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
+import 'package:infinite_sports_flutter/registration/live_registration_config.dart';
+import 'package:infinite_sports_flutter/registration/my_registrations.dart'
+    show registrationPathLabel;
 import 'package:infinite_sports_flutter/registration/payment_screen.dart';
+import 'package:infinite_sports_flutter/registration/registration_chip.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
@@ -31,6 +37,10 @@ class RegistrationStatusPage extends StatefulWidget {
   final Stream<List<RegSubmission>>? rosterStream;
   final ShareSheet? shareSheet;
 
+  /// Test seam: the live config stream (null = RegistrationService
+  /// .watchConfig — second review, Important 2).
+  final Stream<RegistrationConfig?>? configStream;
+
   const RegistrationStatusPage({
     super.key,
     required this.regId,
@@ -40,6 +50,7 @@ class RegistrationStatusPage extends StatefulWidget {
     this.teamStream,
     this.rosterStream,
     this.shareSheet,
+    this.configStream,
   });
 
   @override
@@ -47,7 +58,7 @@ class RegistrationStatusPage extends StatefulWidget {
 }
 
 class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
-  late final Stream<RegSubmission?> _submission;
+  late Stream<RegSubmission?> _submission;
   late final Future<List<RegQuestion>> _form;
 
   // The team stream is created lazily from the live submission's teamId and
@@ -59,12 +70,41 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
   Stream<List<RegSubmission>>? _rosterStream;
   String _rosterStreamTeamId = '';
 
+  /// The registration's config, live (second review, Important 2): what is
+  /// owed, the "Complete payment" action and the config handed to the
+  /// payment screen all follow the latest value.
+  late final LiveRegistrationConfig _live = LiveRegistrationConfig(
+    initial: widget.config,
+    source: () =>
+        widget.configStream ?? RegistrationService.watchConfig(widget.regId),
+  )..addListener(_onLiveConfig);
+
+  void _onLiveConfig() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _live
+      ..removeListener(_onLiveConfig)
+      ..dispose();
+    super.dispose();
+  }
+
   @override
   void initState() {
     super.initState();
+    _live.start();
     _submission = widget.submissionStream ??
         RegistrationService.watchMySubmission(widget.regId);
     _form = widget.formFuture ?? RegistrationService.getForm(widget.regId);
+    // Review fix (Minor 1): complete a half-finished submit's legacy Sign Ups
+    // entry (idempotent, server-checked, own uid only). Skipped under the
+    // widget-test seams.
+    if (widget.submissionStream == null) {
+      unawaited(
+          RegistrationService.repairLegacySignUp(widget.regId, widget.config));
+    }
   }
 
   Stream<RegTeam?> _teamStreamFor(String teamId) {
@@ -95,16 +135,7 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
     return value?.toString() ?? '';
   }
 
-  String _pathLabel(String path) {
-    switch (path) {
-      case 'captain':
-        return 'Team captain';
-      case 'joiner':
-        return 'Team member';
-      default:
-        return 'Individual';
-    }
-  }
+  String _pathLabel(String path) => registrationPathLabel(path);
 
   void _copyCode(RegTeam team) {
     Clipboard.setData(ClipboardData(text: team.joinCode));
@@ -297,21 +328,8 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
   /// Paid/Not-paid chip that reads correctly in BOTH light and dark mode
   /// (pale shade100 fills wash out on a dark background).
   Widget _paidChip(BuildContext context,
-      {required bool paid, required String label}) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    final Color background = paid
-        ? (dark ? Colors.green.shade900 : Colors.green.shade100)
-        : (dark ? Colors.orange.shade900 : Colors.orange.shade100);
-    final Color foreground = paid
-        ? (dark ? Colors.green.shade100 : Colors.green.shade900)
-        : (dark ? Colors.orange.shade100 : Colors.orange.shade900);
-    return Chip(
-      label: Text(label),
-      labelStyle: TextStyle(color: foreground),
-      backgroundColor: background,
-      side: BorderSide.none,
-    );
-  }
+          {required bool paid, required String label}) =>
+      RegistrationStatusChip(paid: paid, label: label);
 
   /// Skeleton sweep (F3 Fix 2): "sign-ups/registration list" priority spot —
   /// matches the stack of Cards _statusBody resolves into (status/team card,
@@ -364,6 +382,11 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
                 subSnapshot.connectionState == ConnectionState.waiting) {
               return _spinner(context);
             }
+            if (subSnapshot.hasError) {
+              // A failed/denied read is not "no registration" — say so and
+              // offer a fresh subscription.
+              return _loadFailed(context);
+            }
             final sub = subSnapshot.data;
             if (sub == null) {
               return const Center(
@@ -388,16 +411,67 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
     );
   }
 
+  Widget _loadFailed(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text("Couldn't load your registration. Try again.",
+                textAlign: TextAlign.center),
+            const SizedBox(height: 12),
+            OutlinedButton(
+              onPressed: () => setState(() {
+                _submission = widget.submissionStream ??
+                    RegistrationService.watchMySubmission(widget.regId);
+              }),
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// A short plain notice (fee changed / removed / couldn't check).
+  Widget _notice(BuildContext context, String text) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(text,
+          textAlign: TextAlign.center,
+          style: TextStyle(color: scheme.onSurface)),
+    );
+  }
+
   Widget _statusBody(RegSubmission sub, List<RegQuestion> form, RegTeam? team) {
     final byKey = {for (final q in form) q.key: q};
     final orderedKeys = [
       ...form.map((q) => q.key).where(sub.answers.containsKey),
       ...sub.answers.keys.where((k) => !byKey.containsKey(k)),
     ];
-    final owes = paymentOwed(
-        config: widget.config,
-        submission: sub,
-        codeWaivesPayment: team?.codeWaivesPayment ?? false);
+    final waived = team?.codeWaivesPayment ?? false;
+    // "Owes" is the SAME whole-cent discounted total the payment screen
+    // shows: an admin comp to $0 or a 100% discount owes nothing (covered).
+    // owes / covered both come from that one rounded value.
+    final config = _live.config;
+    final owed = discountedAmountOwed(
+        config: config, submission: sub, codeWaivesPayment: waived);
+    final owes = owed > 0;
+    final covered = !sub.paid &&
+        paymentOwed(
+            config: config,
+            submission: sub,
+            codeWaivesPayment: waived) &&
+        owed == 0;
+    final chip = registrationChipFor(
+        config: config, submission: sub, codeWaivesPayment: waived);
     final teamCard = _teamCard(sub, team);
     return Column(
       children: [
@@ -410,21 +484,42 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
             padding: EdgeInsets.fromLTRB(15, 15, 15,
                 15 + (owes ? 0.0 : MediaQuery.paddingOf(context).bottom)),
             children: [
+              if (owes && _live.feeChanged && !_live.removed) ...[
+                _notice(context, kRegistrationFeeChanged),
+                const SizedBox(height: 8),
+              ],
               Card(
                 elevation: 2,
                 child: ListTile(
-                  title: Text(widget.config.label,
+                  title: Text(config.label,
                       style: const TextStyle(fontWeight: FontWeight.bold)),
                   subtitle: Text('Registered as: ${_pathLabel(sub.path)}'),
+                  // The shared chip decision (fix round, Minor 1) — the
+                  // registration list uses the same one.
                   trailing: _paidChip(context,
-                      paid: sub.paid,
-                      label: sub.paid
-                          ? (sub.paidVia == 'team code'
-                              ? 'Paid via team code'
-                              : 'Paid')
-                          : 'Payment pending'),
+                      paid: chip.settled, label: chip.label),
                 ),
               ),
+              if (covered) ...[
+                const SizedBox(height: 8),
+                const Card(
+                  elevation: 2,
+                  child: ListTile(
+                    leading: Icon(Icons.check_circle, color: Colors.green),
+                    title: Text("Nothing to pay — you're covered"),
+                  ),
+                ),
+              ],
+              if (chip.kind == RegistrationChipKind.noCharge) ...[
+                const SizedBox(height: 8),
+                const Card(
+                  elevation: 2,
+                  child: ListTile(
+                    leading: Icon(Icons.check_circle, color: Colors.green),
+                    title: Text('No charge — nothing to pay'),
+                  ),
+                ),
+              ],
               if (teamCard != null) ...[
                 const SizedBox(height: 8),
                 teamCard,
@@ -439,7 +534,33 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
             ],
           ),
         ),
-        if (owes)
+        if (owes && !_live.canPay)
+          // Second review, Important 2 (+ correction): no payment on a
+          // deleted registration or an unconfirmed config. A CLOSED one
+          // keeps "Complete payment" — unpaid registrants still pay.
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(15),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _notice(
+                      context,
+                      _live.removed
+                          ? kRegistrationUnavailable
+                          : kRegistrationCouldNotCheck),
+                  if (!_live.removed) ...[
+                    const SizedBox(height: 8),
+                    OutlinedButton(
+                      onPressed: _live.retrying ? null : _live.retry,
+                      child: Text(_live.retrying ? 'Checking…' : 'Try again'),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        if (owes && _live.canPay)
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(15),
@@ -459,12 +580,17 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
                       MaterialPageRoute(
                           builder: (_) => PaymentScreen(
                               regId: widget.regId,
-                              config: widget.config,
+                              config: config,
                               amount: amountOwed(
-                                  config: widget.config,
+                                  config: config,
                                   submission: sub,
-                                  codeWaivesPayment:
-                                      team?.codeWaivesPayment ?? false))),
+                                  codeWaivesPayment: waived),
+                              // The payment screen keeps following the
+                              // live config itself.
+                              amountFor: (c) => amountOwed(
+                                  config: c,
+                                  submission: sub,
+                                  codeWaivesPayment: waived))),
                     );
                   },
                   child: const Text('Complete payment',

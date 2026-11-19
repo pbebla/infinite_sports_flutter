@@ -17,7 +17,9 @@
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/foundation.dart' show VoidCallback, visibleForTesting;
 import 'package:infinite_sports_flutter/misc/bounded_read.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 /// One user's public identity + career data, as mirrored.
 class PublicProfile {
@@ -116,30 +118,68 @@ bool isSignedInUid(String uid) {
 String profileNodePathFor(String uid) =>
     isSignedInUid(uid) ? 'Users/$uid' : 'PublicProfiles/$uid';
 
-/// Firebase reads over the mirror — once()/onValue only (iOS parity).
+/// Keeps a session `uid → ProfileUrl` cache (LeagueService's and
+/// TournamentService's roster-photo caches) refilled from newer server
+/// values (fresh reads, Task 4, survey list B): a refreshing read of
+/// `PublicProfiles/<uid>/ProfileUrl` (or of the whole mirror) that reports
+/// a newer value overwrites the uids already in [cache]. Returns the
+/// remover.
+VoidCallback followProfileUrlCache(Map<String, String> cache) =>
+    FreshReads.onNewerUnder('PublicProfiles', (path, value) {
+      final parts = path.split('/');
+      if (parts.length == 3 && parts[2] == 'ProfileUrl') {
+        if (cache.containsKey(parts[1])) {
+          cache[parts[1]] = value?.toString() ?? '';
+        }
+      } else if (parts.length == 1 && value is Map) {
+        for (final uid in cache.keys.toList()) {
+          final node = value[uid];
+          cache[uid] = node is Map ? (node['ProfileUrl'] ?? '').toString() : '';
+        }
+      }
+    });
+
+/// Firebase reads over the mirror — refreshing reads / onValue only (iOS
+/// parity).
 class PublicProfiles {
   static DatabaseReference _root() =>
       FirebaseDatabase.instance.ref('PublicProfiles');
 
-  /// One-shot {uid: profile} of the whole mirror ({} on error) — the
-  /// search index / event-attendee bulk read, and the fantasy leaderboard's
-  /// names (inside its reveal gate). Bounded ([kRevealReadTimeout]): a cold
-  /// offline `once()` never answers, so no answer by then is {} too (the
-  /// leaderboard then retries on its next mount).
-  static Future<Map<String, PublicProfile>> getAllOnce() async {
+  /// Test seam replacing the whole-mirror `once()` read: returns the raw
+  /// node value (or throws / never answers, like a failed or offline read).
+  @visibleForTesting
+  static Future<Object?> Function()? rootReadOverride;
+
+  static Future<Object?> _readRoot() async {
+    final override = rootReadOverride;
+    if (override != null) return override();
+    return (await refreshingOnce(_root())).snapshot.value;
+  }
+
+  /// One-shot {uid: profile} of the whole mirror — the search index /
+  /// event-attendee bulk read. Bounded ([kRevealReadTimeout]): a cold
+  /// offline `once()` never answers. A failed read or no answer by then is
+  /// null — NOT {} — so callers can tell "couldn't load" from "nobody".
+  static Future<Map<String, PublicProfile>?> getAllOnceOrNull() async {
     try {
-      final event = await _root().once().bounded('PublicProfiles.getAllOnce');
-      return publicProfilesFromNode(event.snapshot.value);
+      final raw = await _readRoot().bounded('PublicProfiles.getAllOnce');
+      return publicProfilesFromNode(raw);
     } catch (_) {
-      return {};
+      return null;
     }
   }
+
+  /// [getAllOnceOrNull] with a failure folded into {} — the fantasy
+  /// leaderboard's names (inside its reveal gate), which already treats an
+  /// empty result as "retry on the next mount".
+  static Future<Map<String, PublicProfile>> getAllOnce() async =>
+      (await getAllOnceOrNull()) ?? {};
 
   /// One user's mirrored ProfileUrl ('' when absent/error) — roster photo
   /// enrichment.
   static Future<String> getProfileUrlOnce(String uid) async {
     try {
-      final event = await _root().child('$uid/ProfileUrl').once();
+      final event = await refreshingOnce(_root().child('$uid/ProfileUrl'));
       return event.snapshot.value?.toString() ?? '';
     } catch (_) {
       return '';

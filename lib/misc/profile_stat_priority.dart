@@ -88,3 +88,27 @@ List<ParticipationStint> careerHistory(List<ParticipationStint> stints) {
   final out = [...stints]..sort((a, b) => b.sortKey.compareTo(a.sortKey));
   return out;
 }
+
+/// The stat keys for the profile's current-season card (release report #2).
+///
+/// Takes [priority] keys present in [stats] first (in priority order), then
+/// tops up with any other non-zero stat the player has (in [stats] order) —
+/// so a striker whose priority list asks for stats the season map doesn't
+/// carry still shows his Saves instead of a "—" column. Never pads: when only
+/// two stats exist the card shows two columns.
+List<String> pickHeadlineStatKeys(
+  List<String> priority,
+  Map<String, num> stats, {
+  int max = 3,
+}) {
+  final out = <String>[];
+  for (final key in priority) {
+    if (out.length == max) return out;
+    if (stats.containsKey(key) && !out.contains(key)) out.add(key);
+  }
+  for (final e in stats.entries) {
+    if (out.length == max) break;
+    if (e.value != 0 && !out.contains(e.key)) out.add(e.key);
+  }
+  return out;
+}

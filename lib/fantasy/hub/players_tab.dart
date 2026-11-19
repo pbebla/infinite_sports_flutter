@@ -64,6 +64,7 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/data/next_game.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/collapsing_tab_shell.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_rows.dart'
     show OrderChangedPill;
 import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
@@ -90,6 +91,8 @@ class FantasyPlayersTab extends StatefulWidget {
     required this.draft,
     required this.lockOverride,
     required this.gameweeks,
+    this.scheduleUnknown = false,
+    this.scheduleGaveUp = false,
     this.totalsStates,
     this.priceChangeStates,
     this.gamesStates,
@@ -113,6 +116,13 @@ class FantasyPlayersTab extends StatefulWidget {
 
   final FantasyLockOverride lockOverride;
   final List<Gameweek> gameweeks;
+
+  /// The schedule read failed (FantasyScheduleFeed.scheduleUnknown, review 6
+  /// I2): never "Locked" / "Season complete" from that empty list.
+  final bool scheduleUnknown;
+
+  /// The schedule feed has stopped retrying (re-review 6b, item 2).
+  final bool scheduleGaveUp;
 
   // ── Test seams — null = the real FantasyService / LeagueService feeds ──
   final Stream<Map<String, FantasyPlayerTotals>?>? totalsStates;
@@ -271,11 +281,15 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
       _leagueGames.ready &&
       _watchlistLoaded;
 
-  bool get _editable => squadEditable(
+  /// open / locked / unknown (a failed schedule read — review 6, I2).
+  SquadEditState get _editState => squadEditState(
         lockOverride: widget.lockOverride,
         gameweeks: widget.gameweeks,
         nowUtc: _now,
+        scheduleUnknown: widget.scheduleUnknown,
       );
+
+  bool get _editable => _editState == SquadEditState.open;
 
   @override
   void initState() {
@@ -310,7 +324,43 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
     }
   }
 
+  /// The tab is on screen (CollapsingTabShell.isTabOnScreen; true outside
+  /// the hub). While hidden, the season totals feed — re-merged with the live
+  /// gameweek on every live update — is dropped; the numbers on screen stay
+  /// and the service's session cache answers at once on return (review 6,
+  /// M-b). Price changes and the watchlist are small and rarely change.
+  bool _onScreen = true;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final on = CollapsingTabShell.isTabOnScreen(context);
+    if (on == _onScreen) return;
+    _onScreen = on;
+    if (on) {
+      _subscribeTotals();
+    } else {
+      _totalsSub?.cancel();
+      _totalsSub = null;
+    }
+  }
+
   void _subscribeMarketFeeds() {
+    _subscribeTotals();
+    _priceChangesSub = (widget.priceChangeStates ??
+            FantasyService.watchAllPriceChanges(widget.sport, widget.season))
+        .listen((changes) {
+      _session.priceChanges = changes;
+      if (!mounted) return;
+      setState(() => _priceChanges = changes);
+      _pushMovesForSheet();
+    }, onError: (Object _) {
+      if (mounted) setState(() => _priceChanges ??= const {});
+    });
+  }
+
+  void _subscribeTotals() {
+    if (_totalsSub != null) return;
     _totalsSub = (widget.totalsStates ??
             FantasyService.watchPlayerTotals(widget.sport, widget.season))
         .listen((totals) {
@@ -328,16 +378,6 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
       _pushMovesForSheet();
     }, onError: (Object _) {
       if (mounted) setState(() => _totalsLoaded = true);
-    });
-    _priceChangesSub = (widget.priceChangeStates ??
-            FantasyService.watchAllPriceChanges(widget.sport, widget.season))
-        .listen((changes) {
-      _session.priceChanges = changes;
-      if (!mounted) return;
-      setState(() => _priceChanges = changes);
-      _pushMovesForSheet();
-    }, onError: (Object _) {
-      if (mounted) setState(() => _priceChanges ??= const {});
     });
   }
 
@@ -819,16 +859,14 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
                 children: [
                   for (final (label, pos) in [
                     ('All', null),
-                    ('GK', FantasyPosition.gk),
-                    ('DEF', FantasyPosition.def),
-                    ('ATT', FantasyPosition.att),
+                    for (final p in FantasyPosition.values) (p.short, p),
                   ]) ...[
                     _FilterPill(
                       key: ValueKey('market_pos_$label'),
                       selected: _positionFilter == pos,
                       semanticsLabel: label == 'All'
                           ? 'All positions'
-                          : '${positionLabel(pos!)}s',
+                          : pos!.longPlural,
                       onTap: () => setState(() {
                         _positionFilter = pos;
                         _reorder(atTop: true);
@@ -929,6 +967,7 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
       priceOf: widget.draft.addCostOf,
       editable: editable,
       unplaced: widget.draft.unplaced,
+      deadlineUnknown: _editState == SquadEditState.unknown,
     );
     final totals = _totals?[p.name];
     final unaffordable = availability == MarketAddAvailability.unaffordable;
@@ -962,7 +1001,7 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
                   ),
                 ),
                 Text(
-                  '${p.position.db} · ${p.teamName}',
+                  '${p.position.short} · ${p.teamName}',
                   softWrap: true,
                   style: TextStyle(
                     fontSize: 11.5,
@@ -1052,6 +1091,7 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
           _MarketAddControl(
             player: p,
             availability: availability,
+            gaveUp: widget.scheduleGaveUp,
             onAdd: () => _add(p),
             onRemove: () => _remove(p),
           ),
@@ -1311,10 +1351,12 @@ class _MarketAddControl extends StatelessWidget {
     required this.availability,
     required this.onAdd,
     required this.onRemove,
+    this.gaveUp = false,
   });
 
   final FantasyPlayer player;
   final MarketAddAvailability availability;
+  final bool gaveUp;
   final VoidCallback onAdd;
   final VoidCallback onRemove;
 
@@ -1340,13 +1382,15 @@ class _MarketAddControl extends StatelessWidget {
           visualDensity: VisualDensity.compact,
         );
       case MarketAddAvailability.locked:
+      case MarketAddAvailability.deadlineUnknown:
       case MarketAddAvailability.ineligible:
       case MarketAddAvailability.positionFull:
       case MarketAddAvailability.unaffordable:
         // Tooltip-style reason on tap (the button is dead, the WHY isn't).
         return Tooltip(
           key: ValueKey('market_add_disabled_${player.name}'),
-          message: marketAddReason(availability, player.position)!,
+          message: marketAddReason(availability, player.position,
+              gaveUp: gaveUp)!,
           triggerMode: TooltipTriggerMode.tap,
           child: Padding(
             padding: const EdgeInsets.all(8),

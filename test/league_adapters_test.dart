@@ -2,6 +2,7 @@ import 'dart:ui' show Color;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
+import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 
 void main() {
@@ -579,6 +580,32 @@ void main() {
       // Owner: misses are timeline markers; RECMiss's only surfaced value
       // is Catch %. No statByName vocabulary for the raw count.
       expect(ff(const {'REC': 7, 'RECMiss': 3}).statByName('recMisses'), 0);
+    });
+  });
+
+  group('leagueCardTeams', () {
+    TournamentMatch game(String a, String b) =>
+        TournamentMatch(id: 'x#0', stage: 's', label: 'l', date: 'd', team1Id: a, team2Id: b, team1Score: 0, team2Score: 0, status: 0, bracketPosition: 0);
+
+    test('adds a stub for a team with no standings row and no crest', () {
+      final t = leagueCardTeams([game('Alpha FC', 'Beta FC')], const [], {});
+      expect(t['Alpha FC']!.name, 'Alpha FC');
+      expect(t['Beta FC']!.name, 'Beta FC');
+    });
+
+    test('skips placeholders', () {
+      final t = leagueCardTeams(
+          [game('Alpha FC', 'Winner of SF1')], const [], {});
+      expect(t.containsKey('Winner of SF1'), isFalse);
+      expect(t.containsKey('Alpha FC'), isTrue);
+    });
+
+    test('keeps a standings row and its crest unchanged', () {
+      final row = leagueTeamStub('Alpha FC', null);
+      final t = leagueCardTeams(
+          [game('Alpha FC', 'Beta FC')], [row], {'Alpha FC': 'u://a'});
+      expect(t['Alpha FC']!.logoUrl, 'u://a');
+      expect(t['Alpha FC']!.id, row.id);
     });
   });
 }

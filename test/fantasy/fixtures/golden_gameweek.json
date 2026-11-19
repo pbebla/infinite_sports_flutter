@@ -70,7 +70,10 @@
     "DEF pts 13,-4,-3,15 sum21 mean5.25 rise>=9.25 fall<=1.25 ->",
     "    Dana +5, Will -5, Eva -5, Bea +5.",
     "ATT pts 12,3,0,9  sum24 mean6.00 rise>=10 fall<=2 ->",
-    "    Alex +5, Wren 0, Ezra -5, Ben 0."
+    "    Alex +5, Wren 0, Ezra -5, Ben 0.",
+    "",
+    "REPLACES (bench player who came on -> the starter he covered, written",
+    "only on that slot): alpha Wren->Ezra, churn Wren->Ezra, boost none."
   ],
   "config": "futsalDefault",
   "players": [
@@ -230,21 +233,24 @@
         "transferCostPoints": 0,
         "netTenths": 350,
         "armband": "Alex",
-        "autoSubbedIn": [ "Wren" ]
+        "autoSubbedIn": [ "Wren" ],
+        "replaces": { "Wren": "Ezra" }
       },
       "boost": {
         "totalTenths": 440,
         "transferCostPoints": 0,
         "netTenths": 440,
         "armband": "Bea",
-        "autoSubbedIn": []
+        "autoSubbedIn": [],
+        "replaces": {}
       },
       "churn": {
         "totalTenths": 595,
         "transferCostPoints": 4,
         "netTenths": 555,
         "armband": "Ben",
-        "autoSubbedIn": [ "Wren" ]
+        "autoSubbedIn": [ "Wren" ],
+        "replaces": { "Wren": "Ezra" }
       }
     },
     "repriceDeltas": {

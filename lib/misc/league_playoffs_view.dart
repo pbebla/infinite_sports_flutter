@@ -17,12 +17,16 @@ class LeaguePlayoffSlot {
   final String? dateKey;
   final int? gameIndex;
 
+  /// The slot key this slot's winner advances to ('sf1'); '' when absent.
+  final String winnerTo;
+
   const LeaguePlayoffSlot({
     required this.key,
     this.team1Seed,
     this.team2Seed,
     this.dateKey,
     this.gameIndex,
+    this.winnerTo = '',
   });
 
   /// Position within its round: the slot key's trailing number ('qf3' → 3).
@@ -66,6 +70,7 @@ class LeaguePlayoffs {
           gameIndex: (ref is Map && ref['index'] != null)
               ? parseInt(ref['index'])
               : null,
+          winnerTo: (v['winnerTo'] ?? '').toString().trim(),
         ));
       });
     }
@@ -104,6 +109,28 @@ List<TournamentMatch> leagueBracketMatches(
           ? _withBracketSlot(m, slotByGameId[m.id]!)
           : m,
   ];
+}
+
+/// The bracket's real wiring for KnockoutTab.feeders (S16 Task 3): league
+/// game id → the ids of the games whose WINNERS feed it (from each slot's
+/// `winnerTo` + `gameRef`), ordered by the feeding slot's position. A
+/// semifinal with a seeded bye side has ONE feeder. Null when nothing is
+/// wired (no playoffs / no usable winnerTo) — KnockoutTab then pairs cards
+/// by index as tournaments do.
+Map<String, List<String>>? leagueBracketFeeders(LeaguePlayoffs? playoffs) {
+  if (playoffs == null) return null;
+  final byKey = {for (final s in playoffs.slots) s.key: s};
+  final sources = [...playoffs.slots]
+    ..sort((a, b) => a.position.compareTo(b.position));
+  final out = <String, List<String>>{};
+  for (final s in sources) {
+    final from = s.gameId;
+    final to = byKey[s.winnerTo]?.gameId;
+    if (from == null || to == null || s.winnerTo.isEmpty) continue;
+    final list = out.putIfAbsent(to, () => []);
+    if (!list.contains(from)) list.add(from);
+  }
+  return out.isEmpty ? null : out;
 }
 
 /// TournamentMatch has no copyWith — rebuild with the slot's position/seeds.

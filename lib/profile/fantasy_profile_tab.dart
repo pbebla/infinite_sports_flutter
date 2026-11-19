@@ -307,7 +307,7 @@ class _PlayerCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final teamLine = [
       if (player.teamName.trim().isNotEmpty) player.teamName.trim(),
-      positionLabel(player.position),
+      player.position.fantasyTag,
     ].join(' · ');
     // Season over: no move line, and the label reads "Final price".
     final finished = source.seasonFinished;
@@ -440,10 +440,11 @@ class _PlayerCard extends StatelessWidget {
   }
 }
 
-/// "Open in Fantasy": the hub on its Players tab, which then pushes THIS
-/// player's profile (with the hub's shared draft) once it is ready —
-/// `fantasyRouteForPlayer` + `fantasyHubPageRoute`, the same helpers the
-/// player-profile page's own button uses.
+/// "Open in Fantasy": through [openFantasyHub] — a Hub already open for this
+/// season is returned to (its current tab is kept), else a new hub opens on
+/// its Players tab; either way THIS player's profile then opens (with the
+/// hub's shared draft) once it is ready — `fantasyRouteForPlayer`, the same
+/// helper the player-profile page's own button uses.
 void _openInFantasy(
     BuildContext context, FantasyProfileSource source, FantasyPlayer player) {
   final access = source.access;
@@ -458,7 +459,7 @@ void _openInFantasy(
     open(context, route);
     return;
   }
-  Navigator.push(context, fantasyHubPageRoute(route));
+  openFantasyHub(context, route);
 }
 
 // ── Manager section ─────────────────────────────────────────────────────────

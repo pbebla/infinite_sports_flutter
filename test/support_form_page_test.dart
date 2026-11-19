@@ -24,7 +24,7 @@ Future<void> _tapVisible(WidgetTester tester, Finder finder) async {
 
 SupportFormPage _page({
   String fromScreen = 'Drawer',
-  Future<int> Function({
+  Future<SupportTicketResult> Function({
     required String category,
     required String message,
     required List<XFile> screenshots,
@@ -77,7 +77,7 @@ void main() {
       required device,
       required screen,
     }) async =>
-            1)));
+            (num: 1, failedScreenshots: 0))));
     await tester.pump();
 
     expect(find.text('Support & feedback'), findsOneWidget);
@@ -110,7 +110,7 @@ void main() {
       required device,
       required screen,
     }) async =>
-            1)));
+            (num: 1, failedScreenshots: 0))));
     await tester.pump();
 
     // Nothing selected, nothing typed.
@@ -211,7 +211,7 @@ void main() {
           'device': device,
           'screen': screen,
         };
-        return 42;
+        return (num: 42, failedScreenshots: 0);
       },
       myTicketsPageBuilder: () =>
           const Scaffold(body: Center(child: Text('stub tickets'))),
@@ -249,6 +249,14 @@ void main() {
     expect(find.byKey(const ValueKey('support_success')), findsOneWidget);
     expect(find.text('Thanks — your reference is #42'), findsOneWidget);
     expect(find.byKey(const ValueKey('support_submit_button')), findsNothing);
+    // Only promises an email copy when there is an address to send it to,
+    // and nothing about failed screenshots when none failed.
+    expect(
+        find.textContaining(
+            "If your account has an email address, we'll send a copy there."),
+        findsOneWidget);
+    expect(find.textContaining("We've emailed you"), findsNothing);
+    expect(find.textContaining("couldn't be attached"), findsNothing);
 
     // "View my tickets" pushes the (stubbed) tickets page.
     await _tapVisible(
@@ -302,5 +310,59 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('support_my_tickets_button')));
     await tester.pumpAndSettle();
     expect(find.text('stub tickets'), findsOneWidget);
+  });
+
+  testWidgets('screenshots that failed to upload are reported on success',
+      (tester) async {
+    Future<void> submitWith(int failed) async {
+      await tester.pumpWidget(wrap(_page(
+        pickImagesOverride: () async => [XFile('a.jpg'), XFile('b.jpg')],
+        submitOverride: ({
+          required category,
+          required message,
+          required screenshots,
+          required name,
+          required email,
+          required uid,
+          required appVersion,
+          required platform,
+          required device,
+          required screen,
+        }) async =>
+            (num: 9, failedScreenshots: failed),
+      )));
+      await tester.pump();
+      await _tapVisible(tester, find.byKey(const ValueKey('support_cat_bug')));
+      await tester.ensureVisible(
+          find.byKey(const ValueKey('support_message_field')));
+      await tester.enterText(
+          find.byKey(const ValueKey('support_message_field')), 'Broken.');
+      await _tapVisible(
+          tester, find.byKey(const ValueKey('support_submit_button')));
+      await tester.pump();
+      await tester.pump();
+    }
+
+    await submitWith(2);
+    expect(find.text("2 screenshots couldn't be attached."), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    await submitWith(1);
+    expect(find.text("1 screenshot couldn't be attached."), findsOneWidget);
+  });
+
+  group('uploadScreenshotsBestEffort', () {
+    test('counts the uploads that failed and keeps the ones that worked',
+        () async {
+      final result = await uploadScreenshotsBestEffort(3, (i) async {
+        if (i == 1) throw Exception('storage/unauthorized');
+        return 'https://example.test/img_$i.jpg';
+      });
+      expect(result.urls, [
+        'https://example.test/img_0.jpg',
+        'https://example.test/img_2.jpg',
+      ]);
+      expect(result.failed, 1);
+    });
   });
 }

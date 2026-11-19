@@ -1,8 +1,16 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/sport_icon.dart';
 import 'package:infinite_sports_flutter/misc/categories.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+
+/// The picker's icon for an event category (fix round 1, M2): sports come
+/// from the app's shared [sportIconOrNull]; "Tournaments" gets the trophy and
+/// any non-sport category a celebration.
+IconData favoriteCategoryIcon(String category) =>
+    sportIconOrNull(category) ??
+    (category == 'Tournaments' ? Icons.emoji_events : Icons.celebration);
 
 /// "What are you into?" — pick favorite sports/categories. Shown once after
 /// signup and once to existing users who haven't answered. Choosing a category
@@ -40,26 +48,6 @@ class _FavoriteSportsPageState extends State<FavoriteSportsPage> {
     getCategories().then((c) {
       if (mounted) setState(() => _categories = c);
     });
-  }
-
-  IconData _iconFor(String category) {
-    switch (category) {
-      case 'Futsal':
-      case 'Soccer':
-        return Icons.sports_soccer;
-      case 'Basketball':
-        return Icons.sports_basketball;
-      case 'Flag Football':
-        return Icons.sports_football;
-      case 'Volleyball':
-        return Icons.sports_volleyball;
-      case 'Pickleball':
-        return Icons.sports_tennis;
-      case 'Tournaments':
-        return Icons.emoji_events;
-      default:
-        return Icons.celebration;
-    }
   }
 
   Future<void> _finish({required bool save}) async {
@@ -128,7 +116,7 @@ class _FavoriteSportsPageState extends State<FavoriteSportsPage> {
                     for (final category in _categories)
                       _CategoryTile(
                         label: category,
-                        icon: _iconFor(category),
+                        icon: favoriteCategoryIcon(category),
                         selected: _selected.contains(category),
                         onTap: () => setState(() {
                           if (!_selected.remove(category)) _selected.add(category);

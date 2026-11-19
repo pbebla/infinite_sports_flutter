@@ -22,92 +22,14 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
             settings: settings,
             builder: (BuildContext context) {
               if (settings.name == "/futsalLeagues") {
-                return FutureBuilder(
-                  future: getSeasonTiles("Futsal", context), 
-                  builder:(context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      // Skeleton sweep (F3 Fix 2): matches the season-tile
-                      // list this resolves into below, app bar included so
-                      // it doesn't pop in once the data arrives.
-                      return Scaffold(
-                        appBar: AppBar(centerTitle: true, title: const Text("Futsal")),
-                        body: const SkeletonList(),
-                      );
-                    }
-                    return Scaffold(
-                      appBar: AppBar(
-                        centerTitle: true,
-                        title: Text("Futsal")
-                      ),
-                      // P2.1: SeasonCards need no dividers between rows.
-                      // Bottom inset clears the floating glass nav bar
-                      // (PR #12 review).
-                      body: ListView.builder(
-                        padding: EdgeInsets.fromLTRB(
-                            0, 8, 0, 8 + MediaQuery.paddingOf(context).bottom),
-                        itemCount: snapshot.data!.length,
-                        itemBuilder: (context, index) => snapshot.data![index]
-                      )
-                    );
-                  },);
+                // Follows the live season pointer (fresh-reads Task 2).
+                return SeasonTilesPage(sport: "Futsal", title: "Futsal");
               } else if (settings.name == '/basketballLeagues') {
-                return FutureBuilder(
-                  future: getSeasonTiles("Basketball", context), 
-                  builder:(context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      // Skeleton sweep (F3 Fix 2): matches the season-tile
-                      // list this resolves into below, app bar included so
-                      // it doesn't pop in once the data arrives.
-                      return Scaffold(
-                        appBar: AppBar(centerTitle: true, title: const Text("Basketball")),
-                        body: const SkeletonList(),
-                      );
-                    }
-                    return Scaffold(
-                      appBar: AppBar(
-                        centerTitle: true,
-                        title: Text("Basketball")
-                      ),
-                      // P2.1: SeasonCards need no dividers between rows.
-                      // Bottom inset clears the floating glass nav bar
-                      // (PR #12 review).
-                      body: ListView.builder(
-                        padding: EdgeInsets.fromLTRB(
-                            0, 8, 0, 8 + MediaQuery.paddingOf(context).bottom),
-                        itemCount: snapshot.data!.length,
-                        itemBuilder: (context, index) => snapshot.data![index]
-                      )
-                    );
-                  },);
+                // Follows the live season pointer (fresh-reads Task 2).
+                return SeasonTilesPage(sport: "Basketball", title: "Basketball");
               } else if (settings.name == '/flagFootballLeagues') {
-                return FutureBuilder(
-                  future: getSeasonTiles("Flag Football", context), 
-                  builder:(context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      // Skeleton sweep (F3 Fix 2): matches the season-tile
-                      // list this resolves into below, app bar included so
-                      // it doesn't pop in once the data arrives.
-                      return Scaffold(
-                        appBar: AppBar(centerTitle: true, title: const Text("Flag Football")),
-                        body: const SkeletonList(),
-                      );
-                    }
-                    return Scaffold(
-                      appBar: AppBar(
-                        centerTitle: true,
-                        title: Text("Flag Football")
-                      ),
-                      // P2.1: SeasonCards need no dividers between rows.
-                      // Bottom inset clears the floating glass nav bar
-                      // (PR #12 review).
-                      body: ListView.builder(
-                        padding: EdgeInsets.fromLTRB(
-                            0, 8, 0, 8 + MediaQuery.paddingOf(context).bottom),
-                        itemCount: snapshot.data!.length,
-                        itemBuilder: (context, index) => snapshot.data![index]
-                      )
-                    );
-                  },);
+                // Follows the live season pointer (fresh-reads Task 2).
+                return SeasonTilesPage(sport: "Flag Football", title: "Flag Football");
               } else if (settings.name == '/currentLeague') {
                 return ShowLeaguePage(sport: (settings.arguments as List<String>)[0], season: (settings.arguments as List<String>)[1]);
               } else if (settings.name == '/afcsanjose') {

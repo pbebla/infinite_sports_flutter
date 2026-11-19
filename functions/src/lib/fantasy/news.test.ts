@@ -160,6 +160,11 @@ describe('generateNewsDrafts (fake fetch — never throws, null = skip)', () => 
     expect(NEWS_SYSTEM_PROMPT).toContain('stats JSON');
   });
 
+  it('prices are always written with a leading "$" (release report #9)', () => {
+    expect(NEWS_SYSTEM_PROMPT).toContain('Prices are always written with a leading "$" (e.g. "$7.0M")');
+    expect(NEWS_SYSTEM_PROMPT).toContain('tenths of $1M');
+  });
+
   it('tagged players must be named in the stats the model was given', async () => {
     // This week's stats name only A (top scorer). B is a market player the
     // model was never shown; Zed does not exist — both dropped.
@@ -375,5 +380,15 @@ describe('Dream Team post + schedule', () => {
     expect(shouldAutoPublish(
       { Source: 'ai', AutoPublishAt: Number.NaN }, 5000)).toBe(false);
     expect(shouldAutoPublish(null, 5000)).toBe(false);
+  });
+});
+
+describe('parseNewsDrafts adds the "$" to bare prices (fix round 1, M4)', () => {
+  it('title and body', () => {
+    const out = parseNewsDrafts(JSON.stringify([
+      { title: 'Riser: 7.5M', body: 'Up 0.5M to 7.5M this week.', players: [] },
+    ]));
+    expect(out![0].title).toBe('Riser: $7.5M');
+    expect(out![0].body).toBe('Up $0.5M to $7.5M this week.');
   });
 });

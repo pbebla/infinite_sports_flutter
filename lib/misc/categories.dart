@@ -1,4 +1,5 @@
 import 'package:firebase_database/firebase_database.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 /// The shared, owner-editable list of categories ("areas of interest").
 /// Stored at RTDB `/Categories` as an ordered array of names, managed from the
@@ -55,7 +56,7 @@ List<String> parseCategories(dynamic value) {
 Future<List<String>> getCategories() async {
   try {
     final snap =
-        (await FirebaseDatabase.instance.ref('Categories').once()).snapshot;
+        (await refreshingOnce(FirebaseDatabase.instance.ref('Categories'))).snapshot;
     return parseCategories(snap.value);
   } catch (_) {
     return List<String>.from(kDefaultCategories);

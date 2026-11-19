@@ -45,8 +45,9 @@ class _FantasyWalkthroughState extends State<FantasyWalkthrough> {
         title: 'Build your seven',
         body: "Pick ${cfg.squadSize} of the league's real players within a "
             '${formatMoneyTenths(cfg.budgetTenths)} budget — '
-            '${cfg.startersGk} keeper, ${cfg.startersDef} defenders and '
-            '${cfg.startersAtt} attackers start, plus a '
+            '${FantasyPosition.gk.count(cfg.startersGk)}, '
+            '${FantasyPosition.def.count(cfg.startersDef)} and '
+            '${FantasyPosition.att.count(cfg.startersAtt)} start, plus a '
             '${cfg.benchDef + cfg.benchAtt}-player bench.',
       ),
       _WalkthroughCard(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/season_title.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
-import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/misc/team_logos.dart' show teamLogoUrl;
 import 'package:infinite_sports_flutter/model/basketballteaminfo.dart';
 import 'package:infinite_sports_flutter/model/flagfootballteaminfo.dart';
 import 'package:infinite_sports_flutter/model/futsalteaminfo.dart';
@@ -10,12 +11,24 @@ import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter_launcher_icons/constants.dart';
+import 'package:infinite_sports_flutter/misc/fresh_follow.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
+
+/// The node the top-bar Table is built from (normalized path).
+String tableSourcePath(String sport, String season) =>
+    sport == 'AFC San Jose'
+        ? 'AFC San Jose/Seasons/$season/Table'
+        : '$sport/$season/Teams';
 
 class TablePage extends StatefulWidget {
-  const TablePage({super.key, required this.sport, required this.season});
+  const TablePage(
+      {super.key, required this.sport, required this.season, this.tableLoader});
 
   final String sport;
   final String season;
+
+  /// Test seam: replaces the Firebase standings read (null = the real one).
+  final Future<Map<String, TeamInfo>> Function()? tableLoader;
 
   @override
   State<TablePage> createState() => _TablePageState();
@@ -23,22 +36,58 @@ class TablePage extends StatefulWidget {
 
 class _TablePageState extends State<TablePage> {
   Map<dynamic, dynamic> teams = {};
+
+  /// Read once per open (it was re-created on every build, which also
+  /// flashed the skeleton on any rebuild).
+  late final Future<Map<String, TeamInfo>> _tableFuture = getSeasonTable();
+
+  /// A newer table landed while open (fresh reads, Task 4).
+  Map<String, TeamInfo>? _newer;
+  VoidCallback? _stopNewerFollow;
+
+  /// One in-place refresh at a time; a newer value during one queues
+  /// exactly one more (second review, Minor 4 — the bug class).
+  late final CoalescedRefresh _refresh = CoalescedRefresh(_refreshInPlace);
+
+  @override
+  void initState() {
+    super.initState();
+    // Fresh reads (Task 4, survey list C): while open, a newer server value
+    // of this season's Teams (AFC: Table) repaints the standings IN PLACE —
+    // one setState, no skeleton.
+    _stopNewerFollow = FreshReads.onNewerUnder('', (path, _) {
+      if (path == tableSourcePath(widget.sport, widget.season)) {
+        _refresh.request();
+      }
+    });
+  }
+
+  Future<void> _refreshInPlace() async {
+    final table = await getSeasonTable();
+    if (mounted) setState(() => _newer = table);
+  }
+
+  @override
+  void dispose() {
+    _stopNewerFollow?.call();
+    _refresh.dispose();
+    super.dispose();
+  }
   static const int numItems = 6;
   List<bool> selected = List<bool>.generate(numItems, (int index) => false);
   Future<Map<String, TeamInfo>> getSeasonTable() async {
+    final loader = widget.tableLoader;
+    if (loader != null) return loader();
     DatabaseReference newClient =
         FirebaseDatabase.instance.ref("/${widget.sport}/${widget.season}");
     Map<String, TeamInfo> lineUp = <String, TeamInfo>{};
-    var league = teamLogos;
-    var sport = league[widget.sport];
     if (widget.sport == "Futsal") {
-      var logos = sport![widget.season];
       Map<String, FutsalTeamInfo> gottenLineUp = <String, FutsalTeamInfo>{};
-      final event = (await newClient.child("Teams").once()).snapshot;
+      final event = (await refreshingOnce(newClient.child("Teams"))).snapshot;
       Map eventData = event.value as Map;
       eventData.forEach((key, value) {
         var temp = FutsalTeamInfo();
-        temp.imagePath = logos![key]!;
+        temp.imagePath = teamLogoUrl(widget.sport, widget.season, '$key');
         temp.draws = value["Draws"];
         temp.gc = value["GC"];
         temp.gd = value["GD"];
@@ -56,7 +105,7 @@ class _TablePageState extends State<TablePage> {
       newClient =
           FirebaseDatabase.instance.ref("/${widget.sport}/Seasons/${widget.season}");
       Map<String, SoccerTeamInfo> gottenLineUp = <String, SoccerTeamInfo>{};
-      final event = (await newClient.child("Table").once()).snapshot;
+      final event = (await refreshingOnce(newClient.child("Table"))).snapshot;
       Map eventData = event.value as Map;
       eventData.forEach((key, value) {
         var temp = SoccerTeamInfo();
@@ -74,9 +123,8 @@ class _TablePageState extends State<TablePage> {
         lineUp[team] = gottenLineUp[team] as TeamInfo;
       }
     } else if (widget.sport == "Flag Football") {
-      var logos = sport![widget.season];
       Map<String, FlagFootballTeamInfo> gottenLineUp = <String, FlagFootballTeamInfo>{};
-      final event = (await newClient.child("Teams").once()).snapshot;
+      final event = (await refreshingOnce(newClient.child("Teams"))).snapshot;
       Map eventData = event.value as Map;
       eventData.forEach((key, value) {
         var temp = FlagFootballTeamInfo();
@@ -85,21 +133,20 @@ class _TablePageState extends State<TablePage> {
         temp.ties = value["Ties"] ?? 0;
         temp.pointsFor = value["PF"];
         temp.pointsAgainst = value["PA"];
-        temp.imagePath = logos![key]!;
+        temp.imagePath = teamLogoUrl(widget.sport, widget.season, '$key');
         gottenLineUp[key] = temp;
       });
       for (var team in gottenLineUp.keys) {
         lineUp[team] = gottenLineUp[team] as TeamInfo;
       }
     } else {
-      var logos = sport![widget.season];
       Map<String, BasketballTeamInfo> gottenLineUp =
       <String, BasketballTeamInfo>{};
-      final event = (await newClient.child("Teams").once()).snapshot;
+      final event = (await refreshingOnce(newClient.child("Teams"))).snapshot;
       Map eventData = event.value as Map;
       eventData.forEach((key, value) {
         var temp = BasketballTeamInfo();
-        temp.imagePath = logos![key]!;
+        temp.imagePath = teamLogoUrl(widget.sport, widget.season, '$key');
         temp.ppg = value["PPG"].toDouble();
         temp.pcpg = value["PCPG"].toDouble();
         temp.pd = value["PD"].toDouble();
@@ -393,7 +440,7 @@ class _TablePageState extends State<TablePage> {
                 style: TextStyle(fontSize: Theme.of(context).textTheme.headlineSmall!.fontSize),
                 children: <TextSpan>[
                   TextSpan(
-                    text: '\n${widget.season} Table',
+                    text: '\n${seasonTitle(widget.season)} Table',
                     style: TextStyle(
                       fontSize: Theme.of(context).textTheme.bodySmall!.fontSize,
                     ),
@@ -405,14 +452,21 @@ class _TablePageState extends State<TablePage> {
           foregroundColor: TournamentColors.headerForeground(context),
         ),
         body: FutureBuilder(
-            future: getSeasonTable(),
+            future: _tableFuture,
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 // Skeleton sweep (F3 Fix 2): matches the standings rows
                 // this resolves into below.
                 return const SkeletonList(count: 8);
               }
-              teams = snapshot.data as Map<String, TeamInfo>;
+              // A failed read (offline with nothing saved: the fresh read
+              // gives up at its bound) is a plain message, not a crash.
+              if (snapshot.hasError && _newer == null) {
+                return const Center(
+                    child: Text("Couldn't load this right now. Try again later.",
+                        textAlign: TextAlign.center));
+              }
+              teams = _newer ?? snapshot.data as Map<String, TeamInfo>;
               return SizedBox(
                   width: MediaQuery.of(context).size.width,
                   child: buildTable());

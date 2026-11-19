@@ -5,6 +5,7 @@
 // pure in league_adapters.dart / league_playoffs_view.dart).
 
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/foundation.dart' show VoidCallback;
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/misc/league_playoffs_view.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
@@ -15,6 +16,8 @@ import 'package:infinite_sports_flutter/model/prediction_question.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
+import 'package:infinite_sports_flutter/misc/public_profiles.dart' show followProfileUrlCache;
 
 class LeagueService {
   static DatabaseReference _ref(String path) =>
@@ -26,7 +29,7 @@ class LeagueService {
   /// legacy rendering exactly.
   static Future<int> getStartHour(String sport, String season) async {
     try {
-      final snap = (await _ref('/$sport/$season/Start Time').once()).snapshot;
+      final snap = (await refreshingOnce(_ref('/$sport/$season/Start Time'))).snapshot;
       final v = snap.value;
       if (v is int) return v;
       return int.tryParse(v?.toString() ?? '') ?? 0;
@@ -35,21 +38,15 @@ class LeagueService {
     }
   }
 
-  /// Season logo urls (team name → url) via the cached global Logo Urls map
-  /// (utility.getAllTeamLogo caches on first call; shape
-  /// teamLogos[sport][season][team]).
+  /// Season logo urls (team name → url) from the live global Logo Urls map
+  /// (lib/misc/team_logos.dart; shape teamLogos[sport][season][team]) as
+  /// they are once its first event is in. Screens that must repaint when a
+  /// crest is added use [watchSeasonLogos] instead.
   static Future<Map<String, String>> leagueLogoUrls(
       String sport, String season) async {
     try {
       await getAllTeamLogo();
-      final bySport = teamLogos[sport];
-      if (bySport is! Map) return {};
-      final bySeason = bySport[season];
-      if (bySeason is! Map) return {};
-      return {
-        for (final e in bySeason.entries)
-          if (e.value != null) e.key.toString(): e.value.toString(),
-      };
+      return seasonLogoUrlsFrom(teamLogos, sport, season);
     } catch (_) {
       return {};
     }
@@ -62,7 +59,7 @@ class LeagueService {
       {int startHour = 0}) {
     return _ref('/$sport/$season/Date').onValue.map((event) =>
         leagueMatchesFromDateNode(event.snapshot.value,
-            startHour: startHour));
+            startHour: startHour, sport: sport));
   }
 
   /// Live stream of ONE date's games (P2.1: the Matches-tab league day view
@@ -73,7 +70,7 @@ class LeagueService {
       {int startHour = 0}) {
     return _ref('/$sport/$season/Date/$dateKey').onValue.map((event) =>
         leagueMatchesFromDateNode({dateKey: event.snapshot.value},
-            startHour: startHour));
+            startHour: startHour, sport: sport));
   }
 
   /// Live stream of ONE game node. null while the node is missing.
@@ -90,6 +87,7 @@ class LeagueService {
         index: gameIndex,
         raw: v,
         startHour: startHour,
+        sport: sport,
       );
     });
   }
@@ -116,6 +114,13 @@ class LeagueService {
   /// '' = known-absent) — the league mirror of TournamentService's cache,
   /// so squad avatars resolve once per player per session.
   static final Map<String, String> _profileUrlCache = {};
+
+  /// Refilled from newer server values (fresh reads, Task 4); app lifetime.
+  static final VoidCallback _profileUrlFollow =
+      followProfileUrlCache(_profileUrlCache);
+
+  /// Starts [_profileUrlFollow] (Dart statics are lazy).
+  static void _ensureProfileUrlFollow() => _profileUrlFollow;
 
   /// Clears the in-memory ProfileUrl cache (rare — e.g. after sign-out).
   static void clearProfileUrlCache() => _profileUrlCache.clear();
@@ -211,12 +216,13 @@ class LeagueService {
         }
       }
     }
+    _ensureProfileUrlFollow();
     if (uidsToFetch.isNotEmpty) {
       await Future.wait(uidsToFetch.map((uid) async {
         try {
           // Lockdown B1: other-user photos come from the public mirror.
           final snap =
-              (await _ref('/PublicProfiles/$uid/ProfileUrl').once()).snapshot;
+              (await refreshingOnce(_ref('/PublicProfiles/$uid/ProfileUrl'))).snapshot;
           _profileUrlCache[uid] = snap.value?.toString() ?? '';
         } catch (_) {
           _profileUrlCache[uid] = '';

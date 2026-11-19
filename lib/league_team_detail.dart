@@ -51,6 +51,8 @@ class LeagueTeamDetailPage extends StatefulWidget {
 
 class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage>
     with SingleTickerProviderStateMixin {
+  /// Stops the live season-logo watch (team_logos.dart).
+  VoidCallback? _stopLogos;
   late final TabController _tabController =
       TabController(length: 3, vsync: this);
 
@@ -86,7 +88,9 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage>
       _startHour = h;
       _subscribeGames();
     });
-    LeagueService.leagueLogoUrls(widget.sport, widget.season).then((logos) {
+    // Live (S16 Task 1): a crest added to Logo Urls fills in while open.
+    _stopLogos?.call();
+    _stopLogos = watchSeasonLogos(widget.sport, widget.season, (logos) {
       if (!mounted || logos.isEmpty) return;
       setState(() => _logos = logos);
       _subscribeStandings();
@@ -118,6 +122,7 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage>
     _rostersSub?.cancel();
     _captainsSub?.cancel();
     _tabController.dispose();
+    _stopLogos?.call();
     super.dispose();
   }
 

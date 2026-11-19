@@ -3,9 +3,13 @@
 // seam replaces the real `Users/<uid>` RTDB write so this is testable under
 // plain `flutter test`, matching the pattern in test/welcome_page_test.dart.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:infinite_sports_flutter/firebase_auth/firebase_auth_services.dart'
+    show FreshAccountDeletion;
 import 'package:infinite_sports_flutter/onboarding/about_you_page.dart';
 import 'package:infinite_sports_flutter/onboarding/profile_completion.dart';
 
@@ -33,23 +37,34 @@ Future<void> _enterDob(WidgetTester tester, String mmddyyyy) async {
   await tester.pumpAndSettle();
 }
 
-Future<void> _underageSignOut(
-  WidgetTester tester, {
-  int? stepIndex,
-  int? stepCount,
-  required List<String> calls,
-}) async {
+const _rootLabel = 'Root page';
+const _couldNotRemove =
+    "We couldn't remove this account automatically. Email "
+    "contact@infinitesports.org and we'll delete it.";
+
+/// Pumps a root page with AboutYouPage pushed on top (the real shape: the
+/// exit pops back to the root before signing out).
+Future<void> _pumpPushed(WidgetTester tester, Widget page) async {
   await tester.pumpWidget(MaterialApp(
-    home: AboutYouPage(
-      onDone: () {},
-      stepIndex: stepIndex,
-      stepCount: stepCount,
-      writeOverride: (_) async => calls.add('write'),
-      deleteFreshAccountOverride: () async => calls.add('delete'),
-      signOutOverride: () async => calls.add('signOut'),
+    home: Builder(
+      builder: (context) => Scaffold(
+        body: Center(
+          child: TextButton(
+            onPressed: () => Navigator.push(
+                context, MaterialPageRoute(builder: (_) => page)),
+            child: const Text(_rootLabel),
+          ),
+        ),
+      ),
     ),
   ));
-  // Ten years old today: under the minimum age.
+  await tester.tap(find.text(_rootLabel));
+  await tester.pumpAndSettle();
+}
+
+/// Enters a ten-year-old's date of birth, taps Continue, then Sign out on
+/// the "Sorry, not yet" dialog (does not settle afterwards).
+Future<void> _chooseUnderageSignOut(WidgetTester tester) async {
   final now = DateTime.now();
   final dob = DateTime(now.year - 10, 1, 1);
   await _enterDob(
@@ -61,7 +76,50 @@ Future<void> _underageSignOut(
   await tester.pumpAndSettle();
   expect(find.text('Sorry, not yet'), findsOneWidget);
   await tester.tap(find.byKey(const ValueKey('about_you_underage_sign_out')));
+}
+
+Future<void> _underageSignOut(
+  WidgetTester tester, {
+  int? stepIndex,
+  int? stepCount,
+  required DateTime? createdAt,
+  required List<String> calls,
+  Future<FreshAccountDeletion> Function()? delete,
+}) async {
+  await _pumpPushed(
+    tester,
+    AboutYouPage(
+      onDone: () {},
+      stepIndex: stepIndex,
+      stepCount: stepCount,
+      writeOverride: (_) async => calls.add('write'),
+      deleteFreshAccountOverride: delete ??
+          () async {
+            calls.add('delete');
+            return FreshAccountDeletion.deleted;
+          },
+      signOutOverride: () async => calls.add('signOut'),
+      accountCreatedAtOverride: () => createdAt,
+    ),
+  );
+  await _chooseUnderageSignOut(tester);
   await tester.pumpAndSettle();
+}
+
+/// Fills every field validly (adult DOB 01/01/2000).
+Future<void> _fillValidForm(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('about_you_dob_field')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('OK'));
+  await tester.pumpAndSettle();
+  await tester.enterText(
+      find.byKey(const ValueKey('about_you_city_field')), 'San Jose');
+  await tester.enterText(
+      find.byKey(const ValueKey('about_you_zip_field')), '94088');
+  await tester.tap(find.byKey(const ValueKey('gender_chip_Female')));
+  await _tapVisible(
+      tester, find.byKey(const ValueKey('referral_chip_TikTok')));
+  await tester.pump();
 }
 
 void main() {
@@ -297,43 +355,229 @@ void main() {
   });
 
   testWidgets(
-      'under 13, brand-new account: Sign out deletes it through the server '
-      'once, then signs out', (tester) async {
+      'under 13, signup flow (account minutes old): deletes it through the '
+      'server once, then signs out', (tester) async {
     final calls = <String>[];
-    await _underageSignOut(tester, stepIndex: 2, stepCount: 3, calls: calls);
+    await _underageSignOut(tester,
+        stepIndex: 2,
+        stepCount: 3,
+        createdAt: DateTime.now().subtract(const Duration(minutes: 3)),
+        calls: calls);
+    expect(calls, ['delete', 'signOut']);
+    expect(find.text(_rootLabel), findsOneWidget); // popped to the root
+    expect(find.text(_couldNotRemove), findsNothing);
+  });
+
+  testWidgets(
+      'under 13, later sign-in of a recent incomplete account (no stepIndex): '
+      'still deleted, then signed out', (tester) async {
+    final calls = <String>[];
+    await _underageSignOut(tester,
+        createdAt: DateTime.now().subtract(const Duration(days: 2)),
+        calls: calls);
     expect(calls, ['delete', 'signOut']);
   });
 
   testWidgets(
-      'under 13, existing account (completion gate): Sign out only signs '
+      'under 13, existing member (account older than 7 days): only signs '
       'out, never deletes', (tester) async {
     final calls = <String>[];
-    await _underageSignOut(tester, calls: calls);
+    await _underageSignOut(tester,
+        createdAt: DateTime.now().subtract(const Duration(days: 400)),
+        calls: calls);
+    expect(calls, ['signOut']);
+    expect(find.text(_couldNotRemove), findsNothing);
+  });
+
+  testWidgets(
+      'under 13: server refused the deletion -> still signs out, then says '
+      'so on the root page', (tester) async {
+    final calls = <String>[];
+    await _underageSignOut(tester,
+        createdAt: DateTime.now().subtract(const Duration(days: 1)),
+        calls: calls, delete: () async {
+      calls.add('delete');
+      return FreshAccountDeletion.notDeleted;
+    });
+    expect(calls, ['delete', 'signOut']);
+    expect(find.text(_rootLabel), findsOneWidget);
+    expect(find.text(_couldNotRemove), findsOneWidget);
+  });
+
+  testWidgets(
+      'under 13: a throwing deletion still signs out and shows the message',
+      (tester) async {
+    final calls = <String>[];
+    await _underageSignOut(tester,
+        createdAt: DateTime.now().subtract(const Duration(days: 1)),
+        calls: calls, delete: () async {
+      calls.add('delete');
+      throw Exception('offline');
+    });
+    expect(calls, ['delete', 'signOut']);
+    expect(find.text(_couldNotRemove), findsOneWidget);
+  });
+
+  testWidgets(
+      'under 13, sign-up flow with the phone clock 30 days ahead: deletion '
+      'is still attempted', (tester) async {
+    final calls = <String>[];
+    await _underageSignOut(tester,
+        stepIndex: 2,
+        stepCount: 3,
+        createdAt: DateTime.now().subtract(const Duration(days: 30)),
+        calls: calls);
+    expect(calls, ['delete', 'signOut']);
+  });
+
+  testWidgets(
+      'under 13, old account but the phone clock is behind (creation time '
+      'looks like the future): sign-out only', (tester) async {
+    final calls = <String>[];
+    await _underageSignOut(tester,
+        createdAt: DateTime.now().add(const Duration(days: 1)),
+        calls: calls);
     expect(calls, ['signOut']);
   });
 
-  testWidgets('under 13: a failed deletion still signs out', (tester) async {
+  testWidgets(
+      "under 13: nothing to remove (nobody signed in) -> no 'couldn't "
+      "remove' message", (tester) async {
     final calls = <String>[];
-    await tester.pumpWidget(MaterialApp(
-      home: AboutYouPage(
+    await _underageSignOut(tester,
+        createdAt: DateTime.now().subtract(const Duration(days: 1)),
+        calls: calls, delete: () async {
+      calls.add('delete');
+      return FreshAccountDeletion.nothingToRemove;
+    });
+    expect(calls, ['delete', 'signOut']);
+    expect(find.text(_couldNotRemove), findsNothing);
+  });
+
+  Future<void> openUnderageDialog(
+      WidgetTester tester, DateTime? createdAt, {int? stepIndex}) async {
+    await _pumpPushed(
+      tester,
+      AboutYouPage(
         onDone: () {},
-        stepIndex: 2,
-        stepCount: 3,
+        stepIndex: stepIndex,
+        stepCount: stepIndex == null ? null : 3,
         writeOverride: (_) async {},
-        deleteFreshAccountOverride: () async {
-          calls.add('delete');
-          throw Exception('offline');
-        },
-        signOutOverride: () async => calls.add('signOut'),
+        deleteFreshAccountOverride: () async => FreshAccountDeletion.deleted,
+        signOutOverride: () async {},
+        accountCreatedAtOverride: () => createdAt,
       ),
-    ));
+    );
     final now = DateTime.now();
     await _enterDob(tester, '01/01/${now.year - 10}');
     await _tapVisible(
         tester, find.byKey(const ValueKey('about_you_continue_button')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('about_you_underage_sign_out')));
+  }
+
+  testWidgets(
+      'under 13 dialog: says "Remove account and sign out" when the account '
+      'will be removed', (tester) async {
+    await openUnderageDialog(
+        tester, DateTime.now().subtract(const Duration(days: 1)));
+    expect(find.text('Remove account and sign out'), findsOneWidget);
+    expect(find.textContaining('will be removed'), findsOneWidget);
+  });
+
+  testWidgets(
+      'under 13 dialog: says "Sign out" when the account is only signed out',
+      (tester) async {
+    await openUnderageDialog(
+        tester, DateTime.now().subtract(const Duration(days: 400)));
+    expect(find.text('Sign out'), findsOneWidget);
+    expect(find.text('Remove account and sign out'), findsNothing);
+    expect(find.textContaining('will be removed'), findsNothing);
+  });
+
+  testWidgets(
+      'under 13: the deletion runs behind a blocking progress state on the '
+      'page, before any pop, and a second tap does nothing', (tester) async {
+    final calls = <String>[];
+    final pending = Completer<FreshAccountDeletion>();
+    await _pumpPushed(
+      tester,
+      AboutYouPage(
+        onDone: () {},
+        writeOverride: (_) async => calls.add('write'),
+        deleteFreshAccountOverride: () {
+          calls.add('delete');
+          return pending.future;
+        },
+        signOutOverride: () async => calls.add('signOut'),
+        accountCreatedAtOverride: () =>
+            DateTime.now().subtract(const Duration(minutes: 1)),
+      ),
+    );
+    await _chooseUnderageSignOut(tester);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    // Still on About You (no pop yet), behind the progress state.
+    expect(find.text('About you'), findsOneWidget);
+    expect(find.byKey(const ValueKey('about_you_exit_progress')),
+        findsOneWidget);
+    // A second tap on Continue is blocked.
+    await tester.tap(
+        find.byKey(const ValueKey('about_you_continue_button')),
+        warnIfMissed: false);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Sorry, not yet'), findsNothing);
+    expect(calls, ['delete']);
+
+    pending.complete(FreshAccountDeletion.deleted);
     await tester.pumpAndSettle();
     expect(calls, ['delete', 'signOut']);
+    expect(find.text(_rootLabel), findsOneWidget);
+  });
+
+  testWidgets(
+      'save fails and the account is gone -> back to the root and signed out',
+      (tester) async {
+    final calls = <String>[];
+    await _pumpPushed(
+      tester,
+      AboutYouPage(
+        onDone: () => calls.add('done'),
+        writeOverride: (_) async => throw Exception('permission-denied'),
+        accountGoneOverride: () async => true,
+        signOutOverride: () async => calls.add('signOut'),
+      ),
+    );
+    await _fillValidForm(tester);
+    await _tapVisible(
+        tester, find.byKey(const ValueKey('about_you_continue_button')));
+    await tester.pumpAndSettle();
+    expect(calls, ['signOut']);
+    expect(find.text(_rootLabel), findsOneWidget);
+    // The person is told why they were signed out (on the welcome wall —
+    // the root ScaffoldMessenger outlives the onboarding routes).
+    expect(find.text('This account no longer exists.'), findsOneWidget);
+  });
+
+  testWidgets(
+      'save fails but the account still exists -> stays, shows the error',
+      (tester) async {
+    final calls = <String>[];
+    await _pumpPushed(
+      tester,
+      AboutYouPage(
+        onDone: () => calls.add('done'),
+        writeOverride: (_) async => throw Exception('offline'),
+        accountGoneOverride: () async => false,
+        signOutOverride: () async => calls.add('signOut'),
+      ),
+    );
+    await _fillValidForm(tester);
+    await _tapVisible(
+        tester, find.byKey(const ValueKey('about_you_continue_button')));
+    await tester.pumpAndSettle();
+    expect(calls, isEmpty);
+    expect(find.text('About you'), findsOneWidget);
+    expect(find.text('Something went wrong. Please try again.'),
+        findsOneWidget);
   });
 }

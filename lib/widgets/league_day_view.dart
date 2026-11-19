@@ -1,11 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:infinite_sports_flutter/league_match_detail.dart';
-import 'package:infinite_sports_flutter/league_team_detail.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
+import 'package:infinite_sports_flutter/misc/league_navigation.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
-import 'package:infinite_sports_flutter/misc/schedule_display.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/scorepage.dart';
@@ -47,6 +45,8 @@ class LeagueDayView extends StatefulWidget {
 }
 
 class _LeagueDayViewState extends State<LeagueDayView> {
+  /// Stops the live season-logo watch (team_logos.dart).
+  VoidCallback? _stopLogos;
   List<TournamentMatch>? _matches; // null = first paint -> skeleton
   Map<String, String> _logos = {};
   int _startHour = 0;
@@ -71,7 +71,9 @@ class _LeagueDayViewState extends State<LeagueDayView> {
       _startHour = h;
       _subscribeGames();
     });
-    LeagueService.leagueLogoUrls(widget.sport, widget.season).then((logos) {
+    // Live (S16 Task 1): a crest added to Logo Urls fills in while open.
+    _stopLogos?.call();
+    _stopLogos = watchSeasonLogos(widget.sport, widget.season, (logos) {
       if (!mounted || logos.isEmpty) return;
       setState(() => _logos = logos);
     });
@@ -92,6 +94,7 @@ class _LeagueDayViewState extends State<LeagueDayView> {
   @override
   void dispose() {
     _gamesSub?.cancel();
+    _stopLogos?.call();
     super.dispose();
   }
 
@@ -103,36 +106,15 @@ class _LeagueDayViewState extends State<LeagueDayView> {
     // San Jose (and any unknown sport) keeps the legacy ScorePage (with its
     // voting UI).
     if (isLeagueEngineSport(widget.sport)) {
-      Navigator.push(
+      openLeagueMatch(
         mainContext!,
-        MaterialPageRoute(
-          builder: (_) => LeagueMatchDetailPage(
-            sport: widget.sport,
-            season: widget.season,
-            dateKey: ref.dateKey,
-            gameIndex: ref.index,
-            initialMatch: m,
-          ),
-        ),
+        sport: widget.sport,
+        season: widget.season,
+        match: m,
       );
       return;
     }
     _openLegacyScorePage(ref.index);
-  }
-
-  /// Card team name/logo tap → the league team page (team-tap audit, PR
-  /// feedback). Same root-navigator push as _openMatch above.
-  void _openTeam(String teamName) {
-    Navigator.push(
-      mainContext!,
-      MaterialPageRoute(
-        builder: (_) => LeagueTeamDetailPage(
-          sport: widget.sport,
-          season: widget.season,
-          teamName: teamName,
-        ),
-      ),
-    );
   }
 
   Future<void> _openLegacyScorePage(int index) async {
@@ -197,17 +179,9 @@ class _LeagueDayViewState extends State<LeagueDayView> {
         ),
       );
     }
-    // Logo-backed teams, plus stubs for any real team name the logo map
-    // missed — FixturesTab only makes RESOLVED teams tappable, so without a
-    // stub a logo-less team's label would silently stay untappable.
-    // Placeholders ('Winner of SF1') are skipped: no team page to open.
-    final teams = leagueTeamsById(const [], _logos);
-    for (final m in matches) {
-      for (final name in [m.team1Id, m.team2Id]) {
-        if (name == null || name.isEmpty || isPlaceholderTeam(name)) continue;
-        teams.putIfAbsent(name, () => leagueTeamStub(name, null));
-      }
-    }
+    // Logo-backed teams plus name-only stubs so a logo-less team keeps its
+    // name on the card.
+    final teams = leagueCardTeams(matches, const [], _logos);
     return FixturesTab(
       matches: matches,
       teams: teams,
@@ -215,11 +189,6 @@ class _LeagueDayViewState extends State<LeagueDayView> {
       tournamentId: '',
       sport: widget.sport,
       onMatchTap: _openMatch,
-      // Legacy sports (AFC San Jose etc.) have no league team page, so
-      // their team labels stay untappable (null + tournamentId '').
-      onTeamTap: isLeagueEngineSport(widget.sport)
-          ? (team) => _openTeam(team.id)
-          : null,
     );
   }
 }

@@ -1,6 +1,6 @@
 // The squad builder's two bottom sheets (P3b).
 //
-// showSquadPickerSheet: tap an empty slot (or Swap) → a position-filtered
+// showSquadPickerSheet: tap an empty slot (or Replace) → a position-filtered
 // picker. Search, price-desc default sort with a name toggle, rows of
 // avatar / name (wraps, never underlined) / team / price. Players already in
 // the squad and ineligible guests never appear (squad_builder_logic
@@ -8,10 +8,16 @@
 // the error color.
 //
 // showSquadChipActions: tap a filled chip → Player profile / Make Captain /
-// Make Vice-Captain / Swap / Remove. Bench chips offer only Player profile /
-// Swap / Remove — a bench armband is impossible by construction, not by error
-// message. "Player profile" (round 3) leads the list and is offered whenever
-// the hub supplies an opener.
+// Make Vice-Captain / Substitute / Replace / Remove. Bench chips offer only
+// Player profile / Substitute / Replace / Remove — a bench armband is
+// impossible by construction, not by error message. "Player profile" (round
+// 3) leads the list and is offered whenever the hub supplies an opener.
+// "Replace" (owner decision 4, was "Swap") sells the player for a market
+// pick; "Substitute" (ticket #5) trades places with a squad player of the
+// same position across the bench line — free, not a transfer.
+//
+// showSubstituteSheet: the Substitute choice when the tapped player has
+// several counterparts (a bench player and his position's starters).
 //
 // The search sheet is a StatefulWidget owning its TextEditingController
 // (house dialog-controller rule).
@@ -239,7 +245,7 @@ class _PickerSheetState extends State<_PickerSheet> {
                       ),
                     ),
                     Text(
-                      '${p.teamName} · ${p.position.db}',
+                      '${p.teamName} · ${p.position.short}',
                       softWrap: true,
                       style: TextStyle(
                         fontSize: 11.5,
@@ -268,8 +274,19 @@ class _PickerSheetState extends State<_PickerSheet> {
 }
 
 /// Actions available on a filled chip.
-enum SquadChipAction { profile, makeCaptain, makeVice, swap, remove }
+enum SquadChipAction {
+  profile,
+  makeCaptain,
+  makeVice,
+  substitute,
+  swap,
+  remove,
+}
 
+/// [substituteLabel] is the Substitute tile's text — `Substitute with <Name>`
+/// for one counterpart, `Substitute` for several — or null to hide it (no
+/// counterpart). [SquadChipAction.swap] is the market tile, shown as
+/// "Replace".
 Future<SquadChipAction?> showSquadChipActions(
   BuildContext context, {
   required String playerName,
@@ -277,9 +294,14 @@ Future<SquadChipAction?> showSquadChipActions(
   bool isCaptain = false,
   bool isVice = false,
   bool showProfile = false,
+  String? substituteLabel,
 }) {
   return showModalBottomSheet<SquadChipAction>(
     context: context,
+    // Six tiles (with Substitute) outgrow the default 9/16 cap on a small
+    // phone (final review I1): scroll-controlled, capped like the substitute
+    // sheet, the tiles scroll — the sheet still hugs them when they fit.
+    isScrollControlled: true,
     showDragHandle: true,
     builder: (sheetContext) {
       final scheme = Theme.of(sheetContext).colorScheme;
@@ -294,42 +316,142 @@ Future<SquadChipAction?> showSquadChipActions(
             onTap: () => Navigator.of(sheetContext).pop(action),
           );
       return SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
-              child: Text(
-                playerName,
-                textAlign: TextAlign.center,
-                softWrap: true,
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: scheme.onSurface,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.72),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+                  child: Text(
+                    playerName,
+                    textAlign: TextAlign.center,
+                    softWrap: true,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: scheme.onSurface,
+                    ),
+                  ),
                 ),
-              ),
+                // Viewing a profile is always allowed — the first item
+                // (round 3).
+                if (showProfile)
+                  tile(const ValueKey('action_profile'), Icons.person_outline,
+                      'Player profile', SquadChipAction.profile),
+                // Armbands are starter-only: bench chips simply never offer
+                // them (spec §2 — the kind way to enforce the invariant).
+                if (!bench && !isCaptain)
+                  tile(const ValueKey('action_make_captain'), Icons.copyright,
+                      'Make Captain', SquadChipAction.makeCaptain,
+                      color: accent),
+                if (!bench && !isVice)
+                  tile(const ValueKey('action_make_vice'),
+                      Icons.verified_outlined, 'Make Vice-Captain',
+                      SquadChipAction.makeVice),
+                if (substituteLabel != null)
+                  tile(const ValueKey('action_substitute'), Icons.swap_vert,
+                      substituteLabel, SquadChipAction.substitute),
+                // Owner decision 4: "Replace" (it sells him for a market
+                // pick), so it is never mistaken for the free Substitute
+                // above.
+                tile(const ValueKey('action_swap'), Icons.swap_horiz,
+                    'Replace', SquadChipAction.swap),
+                tile(const ValueKey('action_remove'),
+                    Icons.person_remove_outlined, 'Remove',
+                    SquadChipAction.remove,
+                    color: fantasyDownRed(context)),
+                const SizedBox(height: 4),
+              ],
             ),
-            // Viewing a profile is always allowed — the first item (round 3).
-            if (showProfile)
-              tile(const ValueKey('action_profile'), Icons.person_outline,
-                  'Player profile', SquadChipAction.profile),
-            // Armbands are starter-only: bench chips simply never offer
-            // them (spec §2 — the kind way to enforce the invariant).
-            if (!bench && !isCaptain)
-              tile(const ValueKey('action_make_captain'), Icons.copyright,
-                  'Make Captain', SquadChipAction.makeCaptain,
-                  color: accent),
-            if (!bench && !isVice)
-              tile(const ValueKey('action_make_vice'), Icons.verified_outlined,
-                  'Make Vice-Captain', SquadChipAction.makeVice),
-            tile(const ValueKey('action_swap'), Icons.swap_horiz, 'Swap',
-                SquadChipAction.swap),
-            tile(const ValueKey('action_remove'), Icons.person_remove_outlined,
-                'Remove', SquadChipAction.remove,
-                color: fantasyDownRed(context)),
-            const SizedBox(height: 4),
-          ],
+          ),
+        ),
+      );
+    },
+  );
+}
+
+/// The Substitute choice (ticket #5): who trades places with [playerName].
+/// [candidates] are the squad players of his position across the bench line,
+/// in slot order (SquadDraftController.substituteCandidates). Returns the
+/// chosen slot, or null when dismissed.
+Future<int?> showSubstituteSheet(
+  BuildContext context, {
+  required String playerName,
+  required List<({int slot, String name, FantasyPosition position})>
+      candidates,
+}) {
+  return showModalBottomSheet<int>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (sheetContext) {
+      final scheme = Theme.of(sheetContext).colorScheme;
+      return SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.72),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+                  child: Text(
+                    'Substitute $playerName',
+                    textAlign: TextAlign.center,
+                    softWrap: true,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: scheme.onSurface,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                  child: Text(
+                    "Pick who swaps places. It's free and not a transfer.",
+                    textAlign: TextAlign.center,
+                    softWrap: true,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                for (final c in candidates)
+                  ListTile(
+                    key: ValueKey('substitute_row_${c.name}'),
+                    leading: CircleAvatar(
+                      radius: 17,
+                      backgroundColor: scheme.surfaceContainerHighest,
+                      child: Text(
+                        initialsFor(c.name),
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                    // Wraps, never ellipsized or underlined (house rules).
+                    title: Text(c.name,
+                        softWrap: true,
+                        style: TextStyle(color: scheme.onSurface)),
+                    subtitle: Text(c.position.long,
+                        style: TextStyle(color: scheme.onSurfaceVariant)),
+                    trailing: Icon(Icons.swap_vert,
+                        color: scheme.onSurfaceVariant),
+                    onTap: () => Navigator.of(sheetContext).pop(c.slot),
+                  ),
+                const SizedBox(height: 4),
+              ],
+            ),
+          ),
         ),
       );
     },

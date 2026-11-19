@@ -20,6 +20,13 @@ class KnockoutTab extends StatefulWidget {
   /// tournament behavior unchanged.
   final void Function(TournamentMatch match)? onMatchTap;
 
+  /// S16 Task 3: the bracket's real wiring — match id → the ids of the
+  /// previous-round matches whose winners feed it (one id for a match whose
+  /// other side is a seeded bye). When set, cards are placed from it (see
+  /// [knockoutFeederLayout]) and connectors join only real feeders. Null
+  /// (tournaments) keeps the index pairing (2k, 2k+1) exactly as before.
+  final Map<String, List<String>>? feeders;
+
   const KnockoutTab({
     super.key,
     required this.matches,
@@ -28,6 +35,7 @@ class KnockoutTab extends StatefulWidget {
     this.rosters = const {},
     this.sport = '',
     this.onMatchTap,
+    this.feeders,
   });
 
   @override
@@ -210,12 +218,31 @@ class _KnockoutTabState extends State<KnockoutTab> {
       return const Center(child: Text('Knockout stage not yet available'));
     }
 
-    // Pre-compute centers
-    final centersPerRound = _computeCenters(bracketRounds, byRound);
+    // Pre-compute centers. With the real wiring (league playoffs) cards
+    // follow their feeders; without it (tournaments) today's index pairing.
+    final feeders = widget.feeders;
+    final feederLayout = feeders == null
+        ? null
+        : knockoutFeederLayout([
+            for (final r in bracketRounds)
+              [for (final m in byRound[r] ?? const <TournamentMatch>[]) m.id],
+          ], feeders, slotH: _slotH, slotGap: _slotGap);
+    final centersPerRound =
+        feederLayout?.centers ?? _computeCenters(bracketRounds, byRound);
 
     // Base height = height of the first (tallest) round column
     final firstCount = (byRound[bracketRounds.first] ?? []).length;
-    final baseH = firstCount * (_slotH + _slotGap);
+    var baseH = firstCount * (_slotH + _slotGap);
+    if (feederLayout != null) {
+      // A pushed-down or bye card may sit below the first column.
+      for (int r = 0; r < bracketRounds.length; r++) {
+        if (bracketRounds[r] == TournamentStage.finalStage.label) continue;
+        for (final c in centersPerRound[r]) {
+          final bottom = c + _slotH / 2 + _slotGap;
+          if (bottom > baseH) baseH = bottom;
+        }
+      }
+    }
 
     // Change 1: ensure the Stack is tall enough for the hero + bronze sitting
     // below it in the Final column (both live inside the Stack now).
@@ -316,6 +343,7 @@ class _KnockoutTabState extends State<KnockoutTab> {
                               colGapX: _colGapX,
                               outerPad: _outerPad,
                               dividerColor: dividerColor,
+                              connectors: feederLayout?.connectors,
                             ),
                           ),
                         ),
@@ -711,6 +739,103 @@ class _KnockoutTabState extends State<KnockoutTab> {
 }
 
 // ---------------------------------------------------------------------------
+// Feeder-driven layout (S16 Task 3 — league playoffs with byes)
+// ---------------------------------------------------------------------------
+
+/// One connector: card [toIndex] of round [round] is fed by the cards
+/// [fromIndices] of round `round - 1` (indices in display order).
+@immutable
+class KnockoutConnector {
+  final int round;
+  final int toIndex;
+  final List<int> fromIndices;
+  const KnockoutConnector(this.round, this.toIndex, this.fromIndices);
+
+  @override
+  String toString() => 'KnockoutConnector($round, $toIndex, $fromIndices)';
+}
+
+/// Card centres (relative to the bracket top) and the real feeder links.
+class KnockoutFeederLayout {
+  /// centers[r][k] — centre Y of card k in round r.
+  final List<List<double>> centers;
+  final List<KnockoutConnector> connectors;
+  const KnockoutFeederLayout(this.centers, this.connectors);
+}
+
+/// Places bracket cards from the real wiring. [idsPerRound] — match ids per
+/// round in display order; [feeders] — match id → feeding match ids.
+///  • round 0: evenly spaced (as the index layout);
+///  • later rounds: two+ feeders in the previous round → midway between
+///    the outermost; ONE → level with it; none → the next free row below
+///    the lowest card of its column;
+///  • then any two cards of a column closer than one pitch
+///    ([slotH] + [slotGap]) are pushed apart downward. Rounds are placed in
+///    order from the already-final previous round, so a push carries to
+///    every card it feeds.
+/// For a standard power-of-two bracket wired 2k/2k+1 → k this gives exactly
+/// the index layout's centres.
+KnockoutFeederLayout knockoutFeederLayout(
+  List<List<String>> idsPerRound,
+  Map<String, List<String>> feeders, {
+  double slotH = 96.0,
+  double slotGap = 18.0,
+}) {
+  final pitch = slotH + slotGap;
+  final centers = <List<double>>[];
+  final connectors = <KnockoutConnector>[];
+  for (int r = 0; r < idsPerRound.length; r++) {
+    final ids = idsPerRound[r];
+    if (r == 0) {
+      centers.add([for (int i = 0; i < ids.length; i++) i * pitch + slotH / 2]);
+      continue;
+    }
+    final prevIndex = <String, int>{
+      for (int i = 0; i < idsPerRound[r - 1].length; i++)
+        idsPerRound[r - 1][i]: i,
+    };
+    final prev = centers[r - 1];
+    final col = List<double?>.filled(ids.length, null);
+    for (int k = 0; k < ids.length; k++) {
+      final from = <int>{
+        for (final f in feeders[ids[k]] ?? const <String>[])
+          if (prevIndex[f] != null) prevIndex[f]!,
+      }.toList()
+        ..sort();
+      if (from.isEmpty) continue;
+      connectors.add(KnockoutConnector(r, k, from));
+      col[k] = from.length == 1
+          ? prev[from.first]
+          : (prev[from.first] + prev[from.last]) / 2;
+    }
+    // Cards with no feeder: the next free row below the lowest card.
+    for (int k = 0; k < ids.length; k++) {
+      if (col[k] != null) continue;
+      double? lowest;
+      for (final c in col) {
+        if (c != null && (lowest == null || c > lowest)) lowest = c;
+      }
+      col[k] = lowest == null ? slotH / 2 : lowest + pitch;
+    }
+    // Push apart (downward) in centre order; ties keep display order.
+    final placed = [for (final c in col) c!];
+    final order = List<int>.generate(placed.length, (i) => i)
+      ..sort((a, b) {
+        final byY = placed[a].compareTo(placed[b]);
+        return byY != 0 ? byY : a.compareTo(b);
+      });
+    for (int i = 1; i < order.length; i++) {
+      final above = placed[order[i - 1]];
+      if (placed[order[i]] - above < pitch) {
+        placed[order[i]] = above + pitch;
+      }
+    }
+    centers.add(placed);
+  }
+  return KnockoutFeederLayout(centers, connectors);
+}
+
+// ---------------------------------------------------------------------------
 // Multi-round bracket connector painter
 // Draws "]" connectors for every adjacent round pair r → r+1.
 // ---------------------------------------------------------------------------
@@ -726,6 +851,10 @@ class _MultiBracketConnectorPainter extends CustomPainter {
   final double outerPad;
   final Color dividerColor;
 
+  /// S16 Task 3: the real feeder links ([KnockoutFeederLayout.connectors]).
+  /// Null = today's index pairing (tournaments), drawn exactly as before.
+  final List<KnockoutConnector>? connectors;
+
   const _MultiBracketConnectorPainter({
     required this.bracketRounds,
     required this.centersPerRound,
@@ -736,6 +865,7 @@ class _MultiBracketConnectorPainter extends CustomPainter {
     required this.colGapX,
     required this.outerPad,
     required this.dividerColor,
+    this.connectors,
   });
 
   double _xOf(int roundIdx) {
@@ -755,6 +885,12 @@ class _MultiBracketConnectorPainter extends CustomPainter {
       ..color = dividerColor
       ..strokeWidth = 1.5
       ..style = PaintingStyle.stroke;
+
+    final links = connectors;
+    if (links != null) {
+      _paintFeederLinks(canvas, paint, links);
+      return;
+    }
 
     for (int r = 0; r < bracketRounds.length - 1; r++) {
       final leftCenters = centersPerRound[r];
@@ -803,11 +939,59 @@ class _MultiBracketConnectorPainter extends CustomPainter {
     }
   }
 
+  /// One connector per fed card: a horizontal from each real feeder to the
+  /// gap's midline, a vertical spanning the feeders and the fed card, and a
+  /// stub into the fed card — a "]" for two feeders, one straight elbow for
+  /// a single feeder (a flat line when level), nothing for a bye card.
+  void _paintFeederLinks(
+      Canvas canvas, Paint paint, List<KnockoutConnector> links) {
+    for (final link in links) {
+      final r = link.round;
+      if (r < 1 || r >= centersPerRound.length) continue;
+      final leftCenters = centersPerRound[r - 1];
+      final rightCenters = centersPerRound[r];
+      if (link.toIndex >= rightCenters.length) continue;
+      final from = [
+        for (final i in link.fromIndices)
+          if (i < leftCenters.length) leftCenters[i],
+      ];
+      if (from.isEmpty) continue;
+      final leftColActualW =
+          bracketRounds[r - 1] == TournamentStage.finalStage.label
+              ? finalColW
+              : colW;
+      final leftRightEdgeX = _xOf(r - 1) + leftColActualW;
+      final rightLeftEdgeX = _xOf(r);
+      final midX = (leftRightEdgeX + rightLeftEdgeX) / 2;
+      final rightCenterY = rightCenters[link.toIndex];
+
+      final ys = [...from, rightCenterY];
+      final top = ys.reduce((a, b) => a < b ? a : b);
+      final bottom = ys.reduce((a, b) => a > b ? a : b);
+      final path = Path();
+      for (final y in from) {
+        path
+          ..moveTo(leftRightEdgeX, y)
+          ..lineTo(midX, y);
+      }
+      if (bottom > top) {
+        path
+          ..moveTo(midX, top)
+          ..lineTo(midX, bottom);
+      }
+      path
+        ..moveTo(midX, rightCenterY)
+        ..lineTo(rightLeftEdgeX, rightCenterY);
+      canvas.drawPath(path, paint);
+    }
+  }
+
   @override
   bool shouldRepaint(_MultiBracketConnectorPainter old) =>
       old.bracketRounds != bracketRounds ||
       old.centersPerRound != centersPerRound ||
-      old.dividerColor != dividerColor;
+      old.dividerColor != dividerColor ||
+      old.connectors != connectors;
 }
 
 // ---------------------------------------------------------------------------

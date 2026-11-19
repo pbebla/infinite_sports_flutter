@@ -1,12 +1,17 @@
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/firebase_auth/firebase_auth_services.dart';
+import 'package:infinite_sports_flutter/misc/follow_store.dart';
 import 'package:infinite_sports_flutter/misc/forfeit.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 import 'package:infinite_sports_flutter/misc/home_nav.dart';
 import 'package:infinite_sports_flutter/misc/public_profiles.dart';
+import 'package:infinite_sports_flutter/misc/season_pointers.dart';
+import 'package:infinite_sports_flutter/misc/team_logos.dart';
 import 'package:infinite_sports_flutter/model/basketballgame.dart';
 import 'package:infinite_sports_flutter/model/basketballplayer.dart';
 import 'package:infinite_sports_flutter/model/business.dart';
@@ -22,6 +27,11 @@ import 'package:infinite_sports_flutter/model/soccerplayer.dart';
 import 'package:infinite_sports_flutter/model/userinformation.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
+
+// The team-logo cache moved to team_logos.dart (live, S16 Task 1); every
+// legacy reader keeps importing it from here.
+export 'package:infinite_sports_flutter/misc/team_logos.dart'
+    show seasonLogoUrlsFrom, teamLogos, teamLogosVersion, watchSeasonLogos;
 
 
 var infiniteSportsPrimaryColor = const Color.fromARGB(255, 208, 0, 0);
@@ -47,7 +57,41 @@ Color onBrandAccent(BuildContext context) =>
 Map<String, Map<String, Map<String, FutsalPlayer>>> futsalLineups = {};
 Map<String, Map<String, Map<String, BasketballPlayer>>> basketballLineups = {};
 Map<String, Map<String, Map<String, FlagFootballPlayer>>> flagFootballLineups = {};
-Map teamLogos = {};
+
+/// Bumped whenever a lineups cache above is refilled from a newer server
+/// value (fresh reads, Task 4) — open screens built on it (the top-bar
+/// Leaderboard) repaint.
+final ValueNotifier<int> lineupsVersion = ValueNotifier<int>(0);
+
+bool _followingLineUps = false;
+
+/// Session cache refill (survey list B): when a refreshing `Line Ups` read
+/// reports a newer value, the matching cache entry is re-parsed in place
+/// and [lineupsVersion] bumps. Registered once, app lifetime.
+void followLineUps() {
+  if (_followingLineUps) return;
+  _followingLineUps = true;
+  FreshReads.onNewerUnder('', (path, value) {
+    final parts = path.split('/');
+    if (parts.length != 3 || parts[2] != 'Line Ups') return;
+    final season = parts[1];
+    try {
+      switch (parts[0]) {
+        case 'Futsal':
+          futsalLineups[season] = parseFutsalLineUps(value);
+        case 'Basketball':
+          basketballLineups[season] = parseBasketballLineUps(value);
+        case 'Flag Football':
+          flagFootballLineups[season] = parseFlagFootballLineUps(value);
+        default:
+          return;
+      }
+      lineupsVersion.value++;
+    } catch (_) {
+      // A malformed newer value leaves the cache as it was.
+    }
+  });
+}
 FirebaseAuthService auth = FirebaseAuthService();
 bool signedIn = false;
 bool darkModeEnabled = false;
@@ -178,12 +222,14 @@ String convertDateToDatabase(DateTime date) {
   return formattedDate + (date.year.toString());
 }
 
+/// The current league (`Current League`), from the live season pointers
+/// (season_pointers.dart: answers from the saved copy at once, follows the
+/// server). Unchanged contract: absent = "null", a failed read = the error's
+/// text.
 Future<String> getCurrentSport() async {
   try
   {
-    DatabaseReference newClient = FirebaseDatabase.instance.ref();
-    var season = (await newClient.child("Current League").once()).snapshot;
-    return season.value.toString();
+    return (await SeasonPointers.read(kCurrentLeaguePointer)).toString();
   }
   catch (e)
   {
@@ -191,12 +237,13 @@ Future<String> getCurrentSport() async {
   }
 }
 
+/// `<sport> Season`, from the live season pointers (same contract as
+/// [getCurrentSport]).
 Future<String> getCurrentSeason(currentSport) async {
   try
   {
-    DatabaseReference newClient = FirebaseDatabase.instance.ref();
-    var seasonNum = (await newClient.child(currentSport + " Season").once()).snapshot;
-    return seasonNum.value.toString();
+    return (await SeasonPointers.read(seasonPointerPath('$currentSport')))
+        .toString();
   }
   catch (e)
   {
@@ -208,7 +255,7 @@ Future<bool> isSeasonFinished(sport, season) async {
   try
   {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/$season");
-    var seasonFinished = (await newClient.child("Finished").once()).snapshot;
+    var seasonFinished = (await refreshingOnce(newClient.child("Finished"))).snapshot;
     return seasonFinished.value as bool;
   }
   catch (e)
@@ -217,12 +264,12 @@ Future<bool> isSeasonFinished(sport, season) async {
   }
 }
 
+/// `AFC San Jose/Current Season`, from the live season pointers (same
+/// contract as [getCurrentSport]).
 Future<String> getAFCCurrentSeason() async {
   try
   {
-    DatabaseReference newClient = FirebaseDatabase.instance.ref("/AFC San Jose/");
-    var seasonNum = (await newClient.child("Current Season").once()).snapshot;
-    return seasonNum.value.toString();
+    return (await SeasonPointers.read(kAfcSeasonPointer)).toString();
   }
   catch (e)
   {
@@ -235,7 +282,7 @@ Future<bool> isAFCSeasonFinished(season) async {
   {
 
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/AFC San Jose/Seasons/$season");
-    var seasonFinished = (await newClient.child("Finished").once()).snapshot;
+    var seasonFinished = (await refreshingOnce(newClient.child("Finished"))).snapshot;
     return seasonFinished.value as bool;
   }
   catch (e)
@@ -251,7 +298,7 @@ Future<List<String>> getDates(String sport, String season) async {
       sport = "AFC San Jose/Seasons";
     }
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/$season");
-    var event = await newClient.child("Date").once();
+    var event = await refreshingOnce(newClient.child("Date"));
     var datesGotten = event.snapshot.value as Map<dynamic, dynamic>;
 
     var dates = List<String>.from(datesGotten.keys);
@@ -287,7 +334,7 @@ Future<String> getMinSeason(sport) async {
   try
   {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport");
-    var seasonNum = (await newClient.child("Init Season").once()).snapshot;
+    var seasonNum = (await refreshingOnce(newClient.child("Init Season"))).snapshot;
     return seasonNum.value.toString();
   }
   catch (e)
@@ -299,7 +346,7 @@ Future<String> getMinSeason(sport) async {
 Future<List<String>> getSoccerSeasons(sport) async {
   if (sport == "AFC San Jose") {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/");
-    var event = await newClient.child("Seasons").once();
+    var event = await refreshingOnce(newClient.child("Seasons"));
     if (event.snapshot.value == null) return [];
     var seasons = event.snapshot.value as Map<dynamic, dynamic>;
     return seasons.keys.toList().cast<String>();
@@ -311,7 +358,7 @@ Future<Map<String, SoccerPlayer>> getSoccerRoster(sport, season) async {
   Map<String, SoccerPlayer> roster = {};
   if (sport == "AFC San Jose") {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/Seasons/$season");
-    var event = await newClient.child("Roster").once();
+    var event = await refreshingOnce(newClient.child("Roster"));
     var lineup = event.snapshot.value as Map;
     lineup.forEach((name, info) {
       SoccerPlayer temp = SoccerPlayer();
@@ -333,8 +380,16 @@ Future<Map<String, SoccerPlayer>> getSoccerRoster(sport, season) async {
 Future<void> getAllFutsalLineUps(String season) async
 {
   DatabaseReference newClient = FirebaseDatabase.instance.ref("/Futsal/$season");
-  var event = await newClient.child("Line Ups").once();
-  var lineups = event.snapshot.value as Map;
+  var event = await refreshingOnce(newClient.child("Line Ups"));
+  futsalLineups[season] = parseFutsalLineUps(event.snapshot.value);
+  followLineUps();
+}
+
+/// `Futsal/<season>/Line Ups` → the [futsalLineups] shape. Throws on a
+/// malformed node (as the read always did).
+Map<String, Map<String, FutsalPlayer>> parseFutsalLineUps(Object? value)
+{
+  var lineups = value as Map;
   Map<String, Map<String, FutsalPlayer>> result = {};
   lineups.forEach((team, lineup) {
     Map<String, FutsalPlayer> temp = {};
@@ -351,14 +406,22 @@ Future<void> getAllFutsalLineUps(String season) async
     result[team] = temp;
   },);
 
-  futsalLineups[season] = result;
+  return result;
 }
 
 Future<void> getAllFlagFootballLineUps(String season) async
 {
   DatabaseReference newClient = FirebaseDatabase.instance.ref("/Flag Football/$season");
-  var event = await newClient.child("Line Ups").once();
-  var lineups = event.snapshot.value as Map;
+  var event = await refreshingOnce(newClient.child("Line Ups"));
+  flagFootballLineups[season] = parseFlagFootballLineUps(event.snapshot.value);
+  followLineUps();
+}
+
+/// `Flag Football/<season>/Line Ups` → the [flagFootballLineups] shape. Throws on a
+/// malformed node (as the read always did).
+Map<String, Map<String, FlagFootballPlayer>> parseFlagFootballLineUps(Object? value)
+{
+  var lineups = value as Map;
   Map<String, Map<String, FlagFootballPlayer>> result = {};
   lineups.forEach((team, lineup) {
     Map<String, FlagFootballPlayer> temp = {};
@@ -396,14 +459,22 @@ Future<void> getAllFlagFootballLineUps(String season) async
     result[team] = temp;
   },);
 
-  flagFootballLineups[season] = result;
+  return result;
 }
 
 Future<void> getAllBasketballLineUps(String season) async
 {
   DatabaseReference newClient = FirebaseDatabase.instance.ref("/Basketball/$season");
-  var event = await newClient.child("Line Ups").once();
-  var lineups = event.snapshot.value as Map;
+  var event = await refreshingOnce(newClient.child("Line Ups"));
+  basketballLineups[season] = parseBasketballLineUps(event.snapshot.value);
+  followLineUps();
+}
+
+/// `Basketball/<season>/Line Ups` → the [basketballLineups] shape. Throws on a
+/// malformed node (as the read always did).
+Map<String, Map<String, BasketballPlayer>> parseBasketballLineUps(Object? value)
+{
+  var lineups = value as Map;
   Map<String, Map<String, BasketballPlayer>> result = {};
   lineups.forEach((team, lineup) {
     Map<String, BasketballPlayer> temp = {};
@@ -424,7 +495,7 @@ Future<void> getAllBasketballLineUps(String season) async
     });
     result[team] = temp;
   },);
-  basketballLineups[season] = result;
+  return result;
 }
 
 int compareValues(dynamic value1, dynamic value2, bool ascending) =>
@@ -513,7 +584,7 @@ Future<Map<String, List<SoccerGame>>> getAllSoccerGames(sport, season) async {
     } else {
       newClient = FirebaseDatabase.instance.ref("/$sport/$season");
     }
-    var games = (await newClient.child("Date").once()).snapshot;
+    var games = (await refreshingOnce(newClient.child("Date"))).snapshot;
     dynamic data = games.value;
     var result = <String, List<SoccerGame>>{};
     data.forEach((key, value) {
@@ -560,7 +631,7 @@ Future<Map<String, List<FutsalGame>>> getAllFutsalGames(sport, season) async {
   try
   {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/$season");
-    var games = (await newClient.child("Date").once()).snapshot;
+    var games = (await refreshingOnce(newClient.child("Date"))).snapshot;
     dynamic data = games.value;
     var result = <String, List<FutsalGame>>{};
     data.forEach((key, value) {
@@ -607,7 +678,7 @@ Future<Map<String, List<BasketballGame>>> getAllBasketballGames(sport, season) a
   try
   {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/$season");
-    var games = (await newClient.child("Date").once()).snapshot;
+    var games = (await refreshingOnce(newClient.child("Date"))).snapshot;
     dynamic data = games.value;
     var result = <String, List<BasketballGame>>{};
     data.forEach((key, value) {
@@ -654,7 +725,7 @@ Future<Map<String, List<FlagFootballGame>>> getAllFlagFootballGames(sport, seaso
   try
   {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/$season");
-    var games = (await newClient.child("Date").once()).snapshot;
+    var games = (await refreshingOnce(newClient.child("Date"))).snapshot;
     dynamic data = games.value;
     var result = <String, List<FlagFootballGame>>{};
     data.forEach((key, value) {
@@ -796,7 +867,7 @@ Future<int> getSeasonStartTime(times, sport, season) async {
   try
   {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/$season");
-    var event = await newClient.child("Start Time").once();
+    var event = await refreshingOnce(newClient.child("Start Time"));
     late int seasonStart;
     if (event.snapshot.value != null) {
       seasonStart = event.snapshot.value as int;
@@ -841,20 +912,10 @@ Future<Map<String, BasketballPlayer>> getBasketballLineUp(season, team) async {
   return lineup;
 }
 
-Future<void> getAllTeamLogo() async
-{
-  if (teamLogos.isNotEmpty) return;
-
-  DatabaseReference newClient = FirebaseDatabase.instance.ref();
-  var event = await newClient.child("Logo Urls").once();
-  final raw = event.snapshot.value;
-  if (raw is Map) teamLogos = raw;
-
-  newClient = FirebaseDatabase.instance.ref("AFC San Jose");
-  var afcEvent = await newClient.child("Logo URL").once();
-  final afcLogo = afcEvent.snapshot.value;
-  if (afcLogo != null) teamLogos["AFC San Jose"] = afcLogo.toString();
-}
+/// Starts (once) the live `Logo Urls` subscription behind [teamLogos] and
+/// completes when its first event (the saved copy) is in — bounded, never
+/// throws. See lib/misc/team_logos.dart.
+Future<void> getAllTeamLogo() => TeamLogoFeed.ensureStarted();
 
 Future<Game> getGame(widget, sport, season, date, times, num) async {
   try {
@@ -892,14 +953,16 @@ String? convertUrlToId(String url, {bool trimWhitespaces = true}) {
   return null;
 }
 
+/// The legacy drawer's sign-up switch (0 closed, 1 Futsal, 2 Basketball,
+/// 3 other forms), survey #54. A refreshing read (fresh reads, Task 4): the
+/// drawer is never held up by the server — it shows the saved state at once
+/// and repaints when a newer value arrives (navbar.dart); the sign-up WRITE
+/// re-checks it server-first ([checkLegacySignUp]). 0 on error.
 Future<int> getSignUpStatus() async
 {
-  DatabaseReference newClient = FirebaseDatabase.instance.ref("/Sign Ups/");
-
   try
   {
-    var event = await newClient.child("Sign Up Status").once();
-    var status = event.snapshot.value as int;
+    var status = await refreshingValue("Sign Ups/Sign Up Status") as int;
     return status;
   }
   catch (e)
@@ -914,7 +977,7 @@ Future<String> getSignUpDue() async
 
   try
   {
-    var event = await newClient.child("Due").once();
+    var event = await refreshingOnce(newClient.child("Due"));
     var status = event.snapshot.value as String;
     return status;
   }
@@ -930,7 +993,7 @@ Future<String> getSignUpInformation() async
 
   try
   {
-    var event = await newClient.child("Information").once();
+    var event = await refreshingOnce(newClient.child("Information"));
     var status = event.snapshot.value as String;
     return status;
   }
@@ -945,7 +1008,7 @@ Future<UserInformation?> getInformation() async
   DatabaseReference newClient = FirebaseDatabase.instance.ref();
   try
   {
-    var event = await newClient.child("Users/${FirebaseAuth.instance.currentUser!.uid}/Information/").once();
+    var event = await refreshingOnce(newClient.child("Users/${FirebaseAuth.instance.currentUser!.uid}/Information/"));
     var info = event.snapshot.value as Map<dynamic, dynamic>;
     var result = UserInformation();
     result.age = info["Age"] ?? info["age"];
@@ -960,26 +1023,63 @@ Future<UserInformation?> getInformation() async
   }
 }
 
-Future<void> addUpdateInfo(UserInformation information, String phone) async
+/// The legacy LeagueForm's profile write-back (survey #57/#60), fresh reads
+/// Task 3: only the fields the fan changed from the form's prefill
+/// ([legacyInfoChanges]) are written, with update() — it used to `.set()`
+/// the whole Information node from a one-shot (maybe stale) prefill, which
+/// wrote old values back and dropped every other Information field.
+Future<void> addUpdateInfo(UserInformation information, String phone,
+    {required String sport,
+    required UserInformation before,
+    required String phoneBefore}) async
 {
   DatabaseReference newClient = FirebaseDatabase.instance.ref("Users/${FirebaseAuth.instance.currentUser!.uid}");
   try
   {
-    var client = newClient.child("/Information/");
-    Map<String, dynamic> infoList = {
-      "Age" : information.age,
-      "Height": information.height,
-      "FutsalPosition" : information.futsalPosition,
-      "BasketballPosition": information.basketballPosition
-    };
-    await client.set(infoList);
-    var phoneClient = newClient.child("/Phone Number/");
-    await phoneClient.set(phone);
+    final changes = legacyInfoChanges(
+        sport: sport,
+        before: before,
+        after: information,
+        phoneBefore: phoneBefore,
+        phoneAfter: phone);
+    if (changes.info.isNotEmpty) {
+      await newClient.child("Information").update(changes.info);
+    }
+    if (changes.phone != null) {
+      await newClient.child("Phone Number").set(changes.phone);
+    }
   }
   catch (e)
   {
 
   }
+}
+
+/// What [addUpdateInfo] writes, pure: Age and Height when changed, the
+/// position of the form's [sport] only (Basketball → BasketballPosition,
+/// otherwise FutsalPosition) when changed, and the phone when changed.
+({Map<String, Object?> info, String? phone}) legacyInfoChanges({
+  required String sport,
+  required UserInformation before,
+  required UserInformation after,
+  required String phoneBefore,
+  required String phoneAfter,
+}) {
+  final info = <String, Object?>{};
+  if (after.age != before.age) info["Age"] = after.age;
+  if (after.height != before.height) info["Height"] = after.height;
+  if (sport == "Basketball") {
+    if (after.basketballPosition != before.basketballPosition) {
+      info["BasketballPosition"] = after.basketballPosition;
+    }
+  } else if (after.futsalPosition != before.futsalPosition) {
+    info["FutsalPosition"] = after.futsalPosition;
+  }
+  final phone = phoneAfter.trim();
+  return (
+    info: info,
+    phone: phone != phoneBefore.trim() ? phone : null,
+  );
 }
 
 Future<void> signUpToPlay(String league, String season) async
@@ -1059,17 +1159,134 @@ Future<void> createDatabaseLocation(User user, FileImage? fileImage, String phon
   await dateClient.set(DateTime.now().toString());
 }
 
-Future<void> uploadToken(User user, String token) async
-{
-  DatabaseReference newClient = FirebaseDatabase.instance.ref();
-  try
-  {
-    var dateClient = newClient.child("Users/${user.uid}/Token");
+/// Seam over `Users/<uid>/Token` (this phone's FCM token for per-person
+/// pushes) so the token rules below are unit-testable without Firebase.
+abstract class UserTokenNode {
+  Future<void> write(String uid, String token);
 
-    await dateClient.set(token);
+  /// Removes the node in ONE server-checked step when [shouldRemove] says
+  /// so for the value the SERVER holds (never a stale cached value).
+  /// Returns whether the removal committed.
+  Future<bool> removeIf(
+      String uid, bool Function(Object? current) shouldRemove);
+}
+
+class FirebaseUserTokenNode implements UserTokenNode {
+  DatabaseReference _ref(String uid) =>
+      FirebaseDatabase.instance.ref('Users/$uid/Token');
+
+  @override
+  Future<void> write(String uid, String token) => _ref(uid).set(token);
+
+  // A transaction, not `once()` + `remove()`: with disk persistence on, a
+  // `once()` on an unwatched path can answer from a stale cache (this
+  // phone's old token while the server holds another phone's). The server
+  // rejects a transaction run against a stale value and re-runs the
+  // handler with the real one.
+  @override
+  Future<bool> removeIf(
+      String uid, bool Function(Object? current) shouldRemove) async {
+    final result = await _ref(uid).runTransaction(
+      (current) => shouldRemove(current)
+          ? Transaction.success(null)
+          : Transaction.abort(),
+      applyLocally: false,
+    );
+    return result.committed;
   }
-  catch (e) {
+}
 
+/// The transaction handler for [removeUserTokenIfThisDevice]: remove when
+/// the node holds [mine]. A null value also "removes" (null -> null, a
+/// no-op) so an empty local cache never aborts before the server answers;
+/// if the server actually holds another token it re-runs this and aborts.
+bool shouldRemoveTokenNode(Object? current, String mine) =>
+    current == null || current == mine;
+
+/// This phone's FCM token, or null when unavailable.
+Future<String?> currentDeviceFcmToken() =>
+    FirebaseMessaging.instance.getToken();
+
+/// The signed-in uid, or null (also when Firebase is not available).
+String? currentSignedInUid() {
+  try {
+    return FirebaseAuth.instance.currentUser?.uid;
+  } catch (_) {
+    return null;
+  }
+}
+
+/// How long a token detach may take before it is abandoned: sign-out and
+/// the notifications switch must never wait on a slow or offline network.
+const Duration kTokenDetachTimeout = Duration(seconds: 2);
+
+/// Removes `Users/<uid>/Token` ONLY when it still holds THIS phone's token
+/// (another phone the same person signed into later keeps its pushes).
+/// Never throws and gives up after [timeout]. A missing node (a just-deleted
+/// account) is a silent no-op. Returns whether the node was removed.
+Future<bool> removeUserTokenIfThisDevice(
+  String? uid, {
+  UserTokenNode? node,
+  Future<String?> Function()? deviceToken,
+  Duration timeout = kTokenDetachTimeout,
+}) async {
+  if (uid == null || uid.isEmpty) return false;
+  Future<bool> run() async {
+    final mine = await (deviceToken ?? currentDeviceFcmToken)();
+    if (mine == null || mine.isEmpty) return false;
+    final store = node ?? FirebaseUserTokenNode();
+    return store.removeIf(
+        uid, (current) => shouldRemoveTokenNode(current, mine));
+  }
+
+  try {
+    return await run().timeout(timeout);
+  } catch (e) {
+    debugPrint('Device token detach skipped: ${e.runtimeType}');
+    return false;
+  }
+}
+
+/// Writes this phone's token for [uid] unless the Settings "All
+/// notifications" switch is off (then the phone must receive nothing, so
+/// nothing is written). Never throws, and stops WAITING after [timeout]
+/// (a Realtime Database `set` only completes once the server confirms; the
+/// queued write still goes through when the phone reconnects).
+Future<void> uploadTokenForUid(
+  String uid,
+  String token, {
+  UserTokenNode? node,
+  Duration timeout = kTokenDetachTimeout,
+}) async {
+  try {
+    if (!await FollowStore().masterEnabled()) return;
+    await (node ?? FirebaseUserTokenNode())
+        .write(uid, token)
+        .timeout(timeout);
+  } catch (e) {
+    debugPrint('Device token upload failed: ${e.runtimeType}');
+  }
+}
+
+Future<void> uploadToken(User user, String token) =>
+    uploadTokenForUid(user.uid, token);
+
+/// Uploads this phone's current token for the signed-in person (the
+/// notifications switch turned back ON). No-op when signed out. Bounded
+/// by [kTokenDetachTimeout] overall, never throws.
+Future<void> uploadCurrentDeviceToken() async {
+  try {
+    final uid = currentSignedInUid();
+    if (uid == null) return;
+    Future<void> run() async {
+      final token = await currentDeviceFcmToken();
+      if (token == null) return;
+      await uploadTokenForUid(uid, token);
+    }
+
+    await run().timeout(kTokenDetachTimeout);
+  } catch (e) {
+    debugPrint('Device token upload skipped: ${e.runtimeType}');
   }
 }
 
@@ -1088,24 +1305,86 @@ Future<void> addComment(String league, String season, String comment) async
   }
 }
 
+/// Whether [user] is on the legacy sign-up list for [league] [season]
+/// (survey #58/#59). False on error, as before.
 Future<bool> isSignedUp(User user, String league, String season) async
 {
-  DatabaseReference newClient = FirebaseDatabase.instance.ref();
-  var client = newClient.child("Sign Ups/$league/$season/NotPaid/");
-  var client2 = newClient.child("Sign Ups/$league/$season/Paid/");
-
   try
   {
-    var event = await client.once();
-    var listNP = event.snapshot.value as Map;
-    event = await client2.once();
-    var listP = event.snapshot.value ?? {};
-
-    return ((listP as Map).containsKey(user.uid) || listNP.containsKey(user.uid));
+    return await isSignedUpUid(user.uid, league, season);
   }
   catch (e)
   {
     return false;
+  }
+}
+
+/// [isSignedUp] by uid: reads only this fan's own `NotPaid/<uid>` and
+/// `Paid/<uid>` entries (it used to download everyone's lists), both
+/// refreshing reads at once (fresh reads, Task 4: the Sign Up page opens
+/// from the saved copy, no server wait); the sign-up WRITE re-checks them
+/// server-first ([checkLegacySignUp]). Throws on a failed read.
+Future<bool> isSignedUpUid(String uid, String league, String season) async {
+  final reads = await Future.wait([
+    refreshingValue("Sign Ups/$league/$season/NotPaid/$uid"),
+    refreshingValue("Sign Ups/$league/$season/Paid/$uid"),
+  ]);
+  return reads.any((v) => v != null);
+}
+
+/// What the legacy sign-up write may do (fresh reads, Task 3).
+enum LegacySignUpVerdict { allowed, alreadySignedUp, changed, couldNotCheck }
+
+/// The legacy sign-up status number for each league form.
+const Map<String, int> kLegacySignUpStatusFor = {'Futsal': 1, 'Basketball': 2};
+
+/// Whether signing up for [sport] [season] is still right, pure: every
+/// input must come from the server ([allFromServer]); sign-ups must still be
+/// open for this league ([status]); [season] must still be the season after
+/// the live `<sport> Season` pointer ([seasonPointer]) — a stale pointer
+/// would sign the fan up for the wrong season number; and the fan must not
+/// be on the list already (no duplicate).
+LegacySignUpVerdict legacySignUpAllowed({
+  required Object? status,
+  required Object? seasonPointer,
+  required String sport,
+  required String season,
+  required bool alreadySignedUp,
+  required bool allFromServer,
+}) {
+  if (!allFromServer) return LegacySignUpVerdict.couldNotCheck;
+  if (alreadySignedUp) return LegacySignUpVerdict.alreadySignedUp;
+  final pointer = int.tryParse('$seasonPointer');
+  final expected = pointer == null ? null : '${pointer + 1}';
+  final openFor = kLegacySignUpStatusFor[sport];
+  if (openFor == null || '$status' != '$openFor' || expected != season) {
+    return LegacySignUpVerdict.changed;
+  }
+  return LegacySignUpVerdict.allowed;
+}
+
+/// The server check the legacy sign-up write runs first (fresh reads, Task
+/// 3, #54/#58/#59/#63): status, season pointer and this fan's list entries,
+/// all server-first, together. A failed read is "could not check".
+Future<LegacySignUpVerdict> checkLegacySignUp(
+    String uid, String sport, String season) async {
+  try {
+    final reads = await Future.wait([
+      serverFirstValue("Sign Ups/Sign Up Status"),
+      serverFirstValue("$sport Season"),
+      serverFirstValue("Sign Ups/$sport/$season/NotPaid/$uid"),
+      serverFirstValue("Sign Ups/$sport/$season/Paid/$uid"),
+    ]);
+    return legacySignUpAllowed(
+      status: reads[0].value,
+      seasonPointer: reads[1].value,
+      sport: sport,
+      season: season,
+      alreadySignedUp: reads[2].value != null || reads[3].value != null,
+      allFromServer: reads.every((r) => r.fromServer),
+    );
+  } catch (e) {
+    return LegacySignUpVerdict.couldNotCheck;
   }
 }
 
@@ -1114,7 +1393,7 @@ Future<String?> getPhone() async
   DatabaseReference newClient = FirebaseDatabase.instance.ref("");
   try
   {
-    var event = await newClient.child("Users/${FirebaseAuth.instance.currentUser!.uid}/Phone Number/").once();
+    var event = await refreshingOnce(newClient.child("Users/${FirebaseAuth.instance.currentUser!.uid}/Phone Number/"));
     var info = event.snapshot.value.toString();
 
     return info;
@@ -1131,7 +1410,7 @@ Future<String> getSignUpRules() async
 
   try
   {
-    var event = await newClient.child("Rules").once();
+    var event = await refreshingOnce(newClient.child("Rules"));
     var status = event.snapshot.value as String;
     return status;
   }
@@ -1147,7 +1426,7 @@ Future<String> getSignUpWaiver() async
 
   try
   {
-    var event = await newClient.child("Waiver").once();
+    var event = await refreshingOnce(newClient.child("Waiver"));
     var status = event.snapshot.value as String;
     return status;
   }
@@ -1157,13 +1436,13 @@ Future<String> getSignUpWaiver() async
   }
 }
 
+/// `<league> Season` for the legacy drawer's "Sign Up for … Season N+1"
+/// (survey #63), from the live season pointers (Task 2) — the sign-up write
+/// re-checks it with the server ([checkLegacySignUp]). "" on error.
 Future<String> getSeason(league) async {
-  DatabaseReference newClient = FirebaseDatabase.instance.ref();
   try
   {
-    var event = await newClient.child(league + " Season").once();
-    var seasonNum = event.snapshot.value.toString();
-    return seasonNum;
+    return (await SeasonPointers.read(seasonPointerPath('$league'))).toString();
   }
   catch (e)
   {
@@ -1171,11 +1450,12 @@ Future<String> getSeason(league) async {
   }
 }
 
+/// The whole `Sign Ups` node, for the list of other open sign-up forms
+/// (survey #64). A refreshing read (fresh reads, Task 4: opens from the
+/// saved copy, renews it). {} on error.
 Future<Map<dynamic, dynamic>> getOtherSignups() async {
   try {
-    DatabaseReference newClient = FirebaseDatabase.instance.ref();
-    var event = await newClient.child("Sign Ups").once();
-    var status = event.snapshot.value as Map<dynamic, dynamic>;
+    var status = await refreshingValue("Sign Ups") as Map<dynamic, dynamic>;
     return status;
   } catch (e) {
     return {};
@@ -1186,7 +1466,7 @@ Future<List<Business>> getBusinesses() async {
   DatabaseReference newClient = FirebaseDatabase.instance.ref();
   var businesses = List<Business>.empty(growable: true);
   try {
-    var event = await newClient.child("Map").once();
+    var event = await refreshingOnce(newClient.child("Map"));
     var list = event.snapshot.value as List;
     for (var value in list) {
       Business business = Business();
@@ -1212,7 +1492,7 @@ Future<List<Event>> getEvents() async {
   DatabaseReference newClient = FirebaseDatabase.instance.ref();
   var events = List<Event>.empty(growable: true);
   try {
-    var snapshot = await newClient.child("Events").once();
+    var snapshot = await refreshingOnce(newClient.child("Events"));
     var list = snapshot.snapshot.value as List;
     for (var value in list) {
       Event event = Event();
@@ -1251,19 +1531,23 @@ Future<Event> getEvent(index) async {
 /// Date Joined is deliberately NOT mirrored, so [MyUser.dateJoined] is
 /// always '' here; no consumer reads it (the search index and the event
 /// attendee list use name + photo only).
-Future<Map<String, MyUser>> getAllUsers() async {
-  Map<String, MyUser> users = {};
-  try
-  {
-    final profiles = await PublicProfiles.getAllOnce();
-    profiles.forEach((uid, profile) {
-      users[uid] = MyUser(profile.firstName, profile.lastName, "", uid,
-          profile.profileUrl.isEmpty ? null : profile.profileUrl);
-    });
-    return users;
+///
+/// null when the mirror couldn't be loaded (failed / timed-out read) — an
+/// error is not "no users", so callers can show it and retry. [load] is a
+/// test seam replacing [PublicProfiles.getAllOnceOrNull].
+Future<Map<String, MyUser>?> getAllUsers(
+    {Future<Map<String, PublicProfile>?> Function()? load}) async {
+  final Map<String, PublicProfile>? profiles;
+  try {
+    profiles = await (load ?? PublicProfiles.getAllOnceOrNull)();
+  } catch (_) {
+    return null;
   }
-  catch (e)
-  {
-    return users;
-  }
+  if (profiles == null) return null;
+  final users = <String, MyUser>{};
+  profiles.forEach((uid, profile) {
+    users[uid] = MyUser(profile.firstName, profile.lastName, "", uid,
+        profile.profileUrl.isEmpty ? null : profile.profileUrl);
+  });
+  return users;
 }

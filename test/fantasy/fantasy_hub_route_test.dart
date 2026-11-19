@@ -102,12 +102,13 @@ void main() {
     });
 
     test('tab enum order matches the hub TabBar order', () {
-      expect(FantasyHubTab.values.map((t) => t.index), [0, 1, 2, 3, 4]);
+      expect(FantasyHubTab.values.map((t) => t.index), [0, 1, 2, 3, 4, 5]);
       expect(FantasyHubTab.myTeam.index, 0);
       expect(FantasyHubTab.players.index, 1);
-      expect(FantasyHubTab.leaderboards.index, 2);
-      expect(FantasyHubTab.news.index, 3);
-      expect(FantasyHubTab.rules.index, 4);
+      expect(FantasyHubTab.league.index, 2);
+      expect(FantasyHubTab.leaderboards.index, 3);
+      expect(FantasyHubTab.news.index, 4);
+      expect(FantasyHubTab.rules.index, 5);
     });
   });
 

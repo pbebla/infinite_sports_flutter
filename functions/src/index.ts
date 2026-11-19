@@ -446,3 +446,8 @@ export {
 // Account deletion (plan 2026-11-09-account-deletion): a fan deletes their
 // own account (fresh sign-in required); an admin deletes on request.
 export { adminDeleteAccount, deleteAccount } from './account_deletion';
+
+// 'No charge' auto-stamp (plan 2026-11-14-no-charge-payment-option): a
+// fresh sign-up on a registration that costs nothing starts out Paid / no charge; plus the legacy
+// NotPaid cleanup that goes with it.
+export { onLegacyNotPaidCreated, onSubmissionCreatedStampNoCharge } from './no_charge_watch';

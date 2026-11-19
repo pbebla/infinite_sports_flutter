@@ -1,4 +1,5 @@
-import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/foundation.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 /// App store listing URLs, owner-configurable at `AppConfig/StoreLinks`
 /// in the manager so a listing change never needs an app release.
@@ -15,26 +16,43 @@ const String kFallbackPlayUrl =
 
 StoreLinks? _cached;
 
-/// One read per session; falls back to the Play URL so shares always carry
-/// at least one download link.
-Future<StoreLinks> getStoreLinks() async {
-  final cached = _cached;
-  if (cached != null) return cached;
+/// Fresh reads (Task 4, survey list B): a newer `AppConfig/StoreLinks` from
+/// the server refills [_cached]. App lifetime; started by the first read.
+VoidCallback? _cacheFollow;
+
+/// The links in an `AppConfig/StoreLinks` value (Play URL fallback).
+StoreLinks storeLinksFrom(Object? value) {
   String? android;
   String? ios;
+  if (value is Map) {
+    final a = value['Android']?.toString().trim() ?? '';
+    final i = value['iOS']?.toString().trim() ?? '';
+    if (a.isNotEmpty) android = a;
+    if (i.isNotEmpty) ios = i;
+  }
+  return StoreLinks(android: android ?? kFallbackPlayUrl, ios: ios);
+}
+
+/// One read per session (refilled when the server has newer links); falls
+/// back to the Play URL so shares always carry at least one download link.
+Future<StoreLinks> getStoreLinks() async {
+  _cacheFollow ??= FreshReads.onNewer(
+      'AppConfig/StoreLinks', (v) => _cached = storeLinksFrom(v));
+  final cached = _cached;
+  if (cached != null) return cached;
+  Object? value;
   try {
-    final snap =
-        (await FirebaseDatabase.instance.ref('AppConfig/StoreLinks').once())
-            .snapshot;
-    if (snap.value is Map) {
-      final map = snap.value as Map;
-      final a = map['Android']?.toString().trim() ?? '';
-      final i = map['iOS']?.toString().trim() ?? '';
-      if (a.isNotEmpty) android = a;
-      if (i.isNotEmpty) ios = i;
-    }
+    value = await refreshingValue('AppConfig/StoreLinks');
   } catch (_) {}
-  final links = StoreLinks(android: android ?? kFallbackPlayUrl, ios: ios);
+  final links = storeLinksFrom(value);
   _cached = links;
   return links;
+}
+
+/// Test seam: forgets the cache and its follower.
+@visibleForTesting
+void debugResetStoreLinks() {
+  _cacheFollow?.call();
+  _cacheFollow = null;
+  _cached = null;
 }

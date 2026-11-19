@@ -10,6 +10,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_schedule_feed.dart'
+    show kFantasyFeedRetryDelays;
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/player_week_stats.dart';
@@ -24,6 +26,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart'
     show fantasyAccent;
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_page.dart';
+import 'package:infinite_sports_flutter/fantasy/profile/profile_hero.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
@@ -252,10 +255,16 @@ void main() {
     List<TournamentMatch> gamesValue = const [],
     Set<String> watchlistValue = const {},
     List<FantasyPlayer>? playersValue,
+    // The schedule read fails before any value (review 6, I2).
+    bool weeksError = false,
   }) async {
     config.add(FantasyConfigState(
         config: FantasyConfig.futsalDefault(), lockOverride: lock));
-    gameweeks.add(weeks ?? _gameweeks(3));
+    if (weeksError) {
+      gameweeks.addError(StateError('permission-denied'));
+    } else {
+      gameweeks.add(weeks ?? _gameweeks(3));
+    }
     players.add(playersValue ?? market);
     totals.add(totalsValue);
     history.add(historyValue);
@@ -501,7 +510,7 @@ void main() {
     await emitAll(tester);
 
     expect(find.text(_name), findsOneWidget);
-    expect(find.text('Ishtar · Defender #3'), findsOneWidget);
+    expect(find.text('Ishtar · #3 · Fantasy: DEF'), findsOneWidget);
     expect(find.text('\$7.5M'), findsWidgets);
     expect(find.text('▲ \$0.5M this week'), findsOneWidget);
     expect(find.text('64'), findsOneWidget); // total pts
@@ -794,6 +803,45 @@ void main() {
       expect(find.text('Gameweek locked — no changes now.'), findsOneWidget);
     });
 
+    testWidgets('a failed schedule read: the button is dead and says the '
+        "deadline can't be checked — never 'Gameweek locked' (review 6, I2)",
+        (tester) async {
+      await pumpPage(tester);
+      await emitAll(tester,
+          lock: FantasyLockOverride.auto, weeksError: true);
+      final button = tester.widget<FilledButton>(key('profile_add'));
+      expect(button.onPressed, isNull);
+      expect(
+          find.text(
+              "Can't check the deadline right now — try again in a moment."),
+          findsOneWidget);
+      expect(find.text('Gameweek locked — no changes now.'), findsNothing);
+    });
+
+    testWidgets("the schedule read keeps failing: once retrying has stopped "
+        "the note says so with Try again, which reads again (re-review 6b)",
+        (tester) async {
+      await pumpPage(tester);
+      await emitAll(tester,
+          lock: FantasyLockOverride.auto, weeksError: true);
+      expect(key('profile_deadline_retry'), findsNothing);
+      for (final d in kFantasyFeedRetryDelays) {
+        await tester.pump(d + const Duration(milliseconds: 10));
+        gameweeks.addError(StateError('permission-denied'));
+        await tester.pump();
+      }
+      await tester.pump();
+      expect(find.text("Couldn't check the deadline."), findsOneWidget);
+      expect(key('profile_deadline_retry'), findsOneWidget);
+      await tester.tap(key('profile_deadline_retry'));
+      await tester.pump();
+      gameweeks.add(_gameweeks(3));
+      await tester.pump();
+      await tester.pump();
+      expect(key('profile_deadline_retry'), findsNothing);
+      expect(find.text("Couldn't check the deadline."), findsNothing);
+    });
+
     testWidgets('from outside the hub the primary button is Open in Fantasy',
         (tester) async {
       await pumpPage(tester, withDraft: false, fromOutsideHub: true);
@@ -1008,6 +1056,45 @@ void main() {
     expect(style().statusBarBrightness, Brightness.light);
     expectStatusBarOnly(style());
   });
+
+  for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+    testWidgets(
+        '${mode.name} at 360 px: once content reaches the back/star row a '
+        'solid bar backs both buttons (release report #3)', (tester) async {
+      await pumpPage(tester, size: const Size(360, 600), themeMode: mode);
+      await emitAll(tester);
+      final bar = key('profile_pinned_bar');
+      double opacity() => tester
+          .widget<AnimatedOpacity>(
+              find.descendant(of: bar, matching: find.byType(AnimatedOpacity)))
+          .opacity;
+      expect(opacity(), 0, reason: 'over the hero the buttons float');
+
+      // Scroll until the hero's bottom edge (and the stat strip under it)
+      // sits inside the button row, but has not reached the status bar.
+      final heroBottom = tester.getBottomLeft(find.byType(FantasyProfileHero)).dy;
+      final starBottom = tester.getBottomLeft(key('profile_star')).dy;
+      await tester.drag(
+          key('profile_scroll'), Offset(0, -(heroBottom - starBottom + 20)));
+      await tester.pumpAndSettle();
+      expect(opacity(), 1);
+
+      // The bar spans the full width and reaches below both buttons, in the
+      // theme's surface colour (no hard-coded fill).
+      final barRect = tester.getRect(bar);
+      expect(barRect.left, 0);
+      expect(barRect.width, 360);
+      expect(barRect.bottom,
+          greaterThanOrEqualTo(tester.getRect(key('profile_star')).bottom));
+      expect(barRect.bottom,
+          greaterThanOrEqualTo(tester.getRect(key('profile_back')).bottom));
+      final scheme = Theme.of(tester.element(bar)).colorScheme;
+      final fill = tester.widget<DecoratedBox>(find.descendant(
+          of: bar, matching: find.byKey(const ValueKey('profile_bar_fill'))));
+      expect((fill.decoration as BoxDecoration).color, scheme.surface);
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets('no underlined text anywhere on the profile (house rule)',
       (tester) async {

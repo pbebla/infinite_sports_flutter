@@ -322,6 +322,9 @@ class TeamOfWeekStoryCard extends StatelessWidget {
                 showPrices: false,
                 chipWidth: 84,
                 chipAvatarSize: 48,
+                // The canvas caps the court: defenders wide, attackers clear
+                // below them, every chip on the grass (owner 2026-11-17).
+                starterLayout: StarterLayout.story,
                 weekPointsFor: (name) {
                   final points = court.pointsByName[name];
                   return points == null ? null : pointsText(points);

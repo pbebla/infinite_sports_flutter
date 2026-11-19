@@ -25,21 +25,40 @@ enum OnboardingGateDecision {
   askAboutYou,
 
   /// Profile already complete: no About You, but the favorites prompt may run.
-  profileComplete;
+  profileComplete,
+
+  /// "Not completed" that the server did not confirm (the phone's saved copy
+  /// or a failed read — fresh reads, Task 3): the fan is NOT blocked behind
+  /// the mandatory About You page on that evidence alone; neither prompt
+  /// this launch, asked again next launch.
+  notCheckedYet;
 
   bool get showsAboutYou => this == OnboardingGateDecision.askAboutYou;
 
-  bool get showsFavorites => this != OnboardingGateDecision.skipMergedAccount;
+  bool get showsFavorites =>
+      this == OnboardingGateDecision.askAboutYou ||
+      this == OnboardingGateDecision.profileComplete;
 }
 
 /// The gate's decision for [usersNode] (the value of `Users/<uid>`; a missing
 /// or non-Map node is "incomplete", the safer default, exactly as before).
 OnboardingGateDecision onboardingGateDecisionFor(dynamic usersNode) {
+  return onboardingGateDecisionForRead(usersNode, fromServer: true);
+}
+
+/// [onboardingGateDecisionFor] for a read that may not come from the server
+/// (fresh reads, Task 3): a merged account and a COMPLETED profile are
+/// trusted from any source (never re-ask a fan who already completed About
+/// You); an incomplete one only asks when the server said so — otherwise
+/// [OnboardingGateDecision.notCheckedYet].
+OnboardingGateDecision onboardingGateDecisionForRead(dynamic usersNode,
+    {required bool fromServer}) {
   if (usersNode is Map &&
       mergedNoticeFor(usersNode['MergedInto'], null) != null) {
     return OnboardingGateDecision.skipMergedAccount;
   }
-  return profileCompleted(usersNode)
-      ? OnboardingGateDecision.profileComplete
-      : OnboardingGateDecision.askAboutYou;
+  if (profileCompleted(usersNode)) return OnboardingGateDecision.profileComplete;
+  return fromServer
+      ? OnboardingGateDecision.askAboutYou
+      : OnboardingGateDecision.notCheckedYet;
 }

@@ -21,6 +21,7 @@ import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_l
 import 'package:infinite_sports_flutter/fantasy/data/next_game.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
+import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 
 List<Gameweek> _gws(int count) => [
       for (var i = 1; i <= count; i++)
@@ -63,6 +64,7 @@ void main() {
   setUp(() {
     FantasyScheduleFeed.clearSessionCache();
     FantasyLeagueGamesFeed.clearSessionCache();
+    FantasyLeagueTableFeed.clearSessionCache();
     logs = [];
     originalDebugPrint = debugPrint;
     debugPrint = (String? message, {int? wrapWidth}) => logs.add(message ?? '');
@@ -135,8 +137,7 @@ void main() {
       return f..start();
     }
 
-    test('resubscribes the schedule only when the lock hour changes',
-        () async {
+    test('resubscribes the schedule only when the lock hour changes', () async {
       final f = feed();
       config.add(_config(15));
       await pumpEventQueue();
@@ -322,8 +323,7 @@ void main() {
       ]);
     });
 
-    test('a seamed schedule is never written to the session cache',
-        () async {
+    test('a seamed schedule is never written to the session cache', () async {
       final seam = StreamController<List<Gameweek>>.broadcast();
       addTearDown(seam.close);
       feed(gameweekStates: seam.stream);
@@ -404,7 +404,8 @@ void main() {
       expect(f.weekUnknown, isFalse);
     });
 
-    test('weekUnknown: a loaded-empty answer and a kept last-good value are '
+    test(
+        'weekUnknown: a loaded-empty answer and a kept last-good value are '
         'known; a new key forgets the old answer', () async {
       final f = feed();
       config.add(_config(15));
@@ -711,9 +712,12 @@ void main() {
 
     test('cancelling cancels all three listeners', () async {
       var cancelled = 0;
-      final a = StreamController<Object?>.broadcast(onCancel: () => cancelled++);
-      final b = StreamController<Object?>.broadcast(onCancel: () => cancelled++);
-      final c = StreamController<Object?>.broadcast(onCancel: () => cancelled++);
+      final a =
+          StreamController<Object?>.broadcast(onCancel: () => cancelled++);
+      final b =
+          StreamController<Object?>.broadcast(onCancel: () => cancelled++);
+      final c =
+          StreamController<Object?>.broadcast(onCancel: () => cancelled++);
       final s = gameweeksFromNodeStreams(
         dates: a.stream,
         lockedWeeks: b.stream,
@@ -913,6 +917,205 @@ void main() {
       expect(f.ready, isTrue);
       expect(f.startHourKnown, isFalse);
       expect(_nextLine(f), 'vs Nimrod · Sun');
+    });
+
+    test('an error before any games sets failed, and ready opens', () async {
+      final f = feed(() async => 5);
+      await pumpEventQueue();
+      expect(f.failed, isFalse);
+      gameFeeds[0].addError(StateError('denied'));
+      await pumpEventQueue();
+      expect(f.failed, isTrue);
+      expect(f.ready, isTrue);
+      expect(f.games, isEmpty);
+      expect(logs.join('\n'), contains('TestOwner: games feed failed'));
+    });
+
+    test('retry re-subscribes and data clears failed', () async {
+      var changes = 0;
+      final f = FantasyLeagueGamesFeed(
+        sport: 'Futsal',
+        season: '15',
+        owner: 'TestOwner',
+        onChanged: () => changes++,
+        gamesFor: gamesFor,
+        loadStartHour: () async => 5,
+      );
+      addTearDown(f.dispose);
+      f.start();
+      await pumpEventQueue();
+      gameFeeds[0].addError(StateError('denied'));
+      await pumpEventQueue();
+      expect(f.failed, isTrue);
+      final before = changes;
+      f.retry();
+      expect(f.failed, isFalse);
+      expect(f.ready, isFalse);
+      expect(changes, before + 1);
+      expect(requestedHours, [5, 5]);
+      gameFeeds[1].add([_legacyGame(startHour: 5)]);
+      await pumpEventQueue();
+      expect(f.failed, isFalse);
+      expect(f.ready, isTrue);
+      expect(f.games, hasLength(1));
+    });
+
+    test('an error after good games keeps the games and failed stays false',
+        () async {
+      final f = feed(() async => 5);
+      await pumpEventQueue();
+      gameFeeds[0].add([_legacyGame(startHour: 5)]);
+      await pumpEventQueue();
+      gameFeeds[0].addError(StateError('blip'));
+      await pumpEventQueue();
+      expect(f.failed, isFalse);
+      expect(f.games, hasLength(1));
+      expect(f.ready, isTrue);
+    });
+
+    test('retry is a no-op once disposed', () async {
+      final f = feed(() async => 5);
+      await pumpEventQueue();
+      f.dispose();
+      f.retry();
+      expect(requestedHours, [5]);
+    });
+  });
+
+  group('FantasyLeagueTableFeed', () {
+    late List<StreamController<List<TournamentTeam>>> standingsFeeds;
+    late List<Map<String, String>> requestedLogos;
+    late void Function(Map<String, String>)? reportLogos;
+    late int logosStopped;
+    late int changes;
+
+    TournamentTeam team(String name, int points) => TournamentTeam(
+        id: name,
+        name: name,
+        qualification: '',
+        gp: 1,
+        wins: 1,
+        draws: 0,
+        losses: 0,
+        gs: 1,
+        gc: 0,
+        gd: 1,
+        points: points);
+
+    setUp(() {
+      standingsFeeds = [];
+      requestedLogos = [];
+      reportLogos = null;
+      logosStopped = 0;
+      changes = 0;
+    });
+
+    FantasyLeagueTableFeed table() {
+      final f = FantasyLeagueTableFeed(
+        sport: 'Futsal',
+        season: '15',
+        owner: 'TestOwner',
+        onChanged: () => changes++,
+        standingsFor: (logos) {
+          requestedLogos.add(logos);
+          final c = StreamController<List<TournamentTeam>>.broadcast();
+          standingsFeeds.add(c);
+          return c.stream;
+        },
+        watchLogos: (onLogos) {
+          reportLogos = onLogos;
+          return () => logosStopped++;
+        },
+      );
+      addTearDown(f.dispose);
+      return f..start();
+    }
+
+    test('ready only after logos AND standings have answered', () async {
+      final f = table();
+      expect(f.ready, isFalse);
+      reportLogos!({'Ishtar': 'u1'});
+      await pumpEventQueue();
+      expect(f.ready, isFalse); // standings not yet
+      expect(f.logos, {'Ishtar': 'u1'});
+      standingsFeeds[0].add([team('Ishtar', 3)]);
+      await pumpEventQueue();
+      expect(f.ready, isTrue);
+      expect(f.standings.single.name, 'Ishtar');
+      expect(f.failed, isFalse);
+    });
+
+    test(
+        'a standings error before any data sets failed; retry re-subscribes; '
+        'data clears it', () async {
+      final f = table();
+      reportLogos!({});
+      await pumpEventQueue();
+      standingsFeeds[0].addError(StateError('denied'));
+      await pumpEventQueue();
+      expect(f.failed, isTrue);
+      expect(f.ready, isTrue);
+      expect(logs.join('\n'), contains('TestOwner: standings feed failed'));
+      f.retry();
+      expect(f.failed, isFalse);
+      expect(f.ready, isFalse);
+      expect(standingsFeeds, hasLength(2));
+      standingsFeeds[1].add([team('Ishtar', 3)]);
+      await pumpEventQueue();
+      expect(f.failed, isFalse);
+      expect(f.ready, isTrue);
+    });
+
+    test(
+        'a logo change re-subscribes standings with the new map and keeps '
+        'the old rows meanwhile', () async {
+      final f = table();
+      reportLogos!({'Ishtar': 'u1'});
+      await pumpEventQueue();
+      standingsFeeds[0].add([team('Ishtar', 3)]);
+      await pumpEventQueue();
+      reportLogos!({'Ishtar': 'u2'});
+      await pumpEventQueue();
+      expect(requestedLogos, [
+        {'Ishtar': 'u1'},
+        {'Ishtar': 'u2'},
+      ]);
+      expect(f.standings.single.points, 3); // old rows stay
+      expect(f.ready, isTrue);
+      standingsFeeds[1].add([team('Ishtar', 6)]);
+      await pumpEventQueue();
+      expect(f.standings.single.points, 6);
+    });
+
+    test(
+        'a second feed for the same season is ready at once from the '
+        'session cache', () async {
+      final first = table();
+      reportLogos!({'Ishtar': 'u1'});
+      await pumpEventQueue();
+      standingsFeeds[0].add([team('Ishtar', 3)]);
+      await pumpEventQueue();
+      expect(first.ready, isTrue);
+      final second = table();
+      expect(second.ready, isTrue);
+      expect(second.standings.single.name, 'Ishtar');
+      expect(second.logos, {'Ishtar': 'u1'});
+    });
+
+    test('dispose stops the logos watcher and the standings listener',
+        () async {
+      final f = table();
+      reportLogos!({});
+      await pumpEventQueue();
+      expect(standingsFeeds.single.hasListener, isTrue);
+      f.dispose();
+      expect(logosStopped, 1);
+      expect(standingsFeeds.single.hasListener, isFalse);
+      final before = changes;
+      standingsFeeds[0].add([team('Ishtar', 3)]);
+      reportLogos!({'x': 'y'});
+      await pumpEventQueue();
+      expect(changes, before);
     });
   });
 }

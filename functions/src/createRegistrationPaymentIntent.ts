@@ -15,12 +15,12 @@ import {
 
 export const stripeSecretKey = defineSecret('STRIPE_SECRET_KEY');
 
-function parseConfig(raw: unknown): RegistrationConfigLike | null {
+/** The pricing fields of a registration Config, whichever payment methods it
+ *  offers (a free sign-up may offer none). [parseConfig] adds the Stripe gate. */
+export function parseConfigPricing(raw: unknown): RegistrationConfigLike | null {
   if (raw === null || typeof raw !== 'object') return null;
   const c = raw as Record<string, unknown>;
   const targetType = c['TargetType'] === 'tournament' ? 'tournament' : 'league';
-  const methods = (c['Methods'] ?? {}) as Record<string, unknown>;
-  if (methods['stripe'] !== true) return null; // Stripe not enabled for this registration
   const paymentModeRaw = c['PaymentMode'];
   const paymentMode = paymentModeRaw === 'teamFee' || paymentModeRaw === 'both'
     ? paymentModeRaw : 'perPlayer';
@@ -36,7 +36,15 @@ function parseConfig(raw: unknown): RegistrationConfigLike | null {
   };
 }
 
-function parseSubmission(raw: unknown): SubmissionLike | null {
+export function parseConfig(raw: unknown): RegistrationConfigLike | null {
+  const config = parseConfigPricing(raw);
+  if (config === null) return null;
+  const methods = ((raw as Record<string, unknown>)['Methods'] ?? {}) as Record<string, unknown>;
+  if (methods['stripe'] !== true) return null; // Stripe not enabled for this registration
+  return config;
+}
+
+export function parseSubmission(raw: unknown): SubmissionLike | null {
   if (raw === null || typeof raw !== 'object') return null;
   const s = raw as Record<string, unknown>;
   const path = s['Path'];
@@ -70,10 +78,13 @@ function parseDiscountStamp(raw: unknown): DiscountStamp {
   };
 }
 
-function parseTeam(raw: unknown): TeamLike | null {
+export function parseTeam(raw: unknown): TeamLike | null {
   if (raw === null || typeof raw !== 'object') return null;
   const t = raw as Record<string, unknown>;
-  return { codeWaivesPayment: t['CodeWaivesPayment'] === true };
+  return {
+    codeWaivesPayment: t['CodeWaivesPayment'] === true,
+    captainUid: typeof t['CaptainUid'] === 'string' ? t['CaptainUid'] as string : '',
+  };
 }
 
 export const createRegistrationPaymentIntent = onCall(

@@ -1,3 +1,4 @@
+import 'dart:async';
 
 import 'dart:io';
 
@@ -10,11 +11,15 @@ import 'package:infinite_sports_flutter/account/session_sign_out.dart';
 import 'package:infinite_sports_flutter/insiders/insiders_info_page.dart';
 import 'package:infinite_sports_flutter/misc/insider_service.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
+import 'package:infinite_sports_flutter/misc/season_pointers.dart';
+import 'package:infinite_sports_flutter/misc/tournament_service.dart';
+import 'package:infinite_sports_flutter/model/tournament.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
 import 'package:infinite_sports_flutter/onboarding/favorite_sports_page.dart';
 import 'package:infinite_sports_flutter/playerpage.dart';
+import 'package:infinite_sports_flutter/registration/my_registrations.dart';
 import 'package:infinite_sports_flutter/registration/registration_entry_page.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
@@ -23,6 +28,8 @@ import 'package:infinite_sports_flutter/signup.dart';
 import 'package:infinite_sports_flutter/support/support_form_page.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:provider/provider.dart';
+import 'package:infinite_sports_flutter/misc/fresh_follow.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 
 class NavBar extends StatefulWidget {
@@ -41,6 +48,75 @@ class NavBar extends StatefulWidget {
   @override
   State<NavBar> createState() => _NavBarState();
 }
+/// The drawer's registration row (way back, owner-approved 2026-11-14).
+/// [mine] is null until the fan's own registrations have answered: the row
+/// then shows today's state at once (the drawer never waits on the
+/// network). With a registration of their own (open or closed) the row is
+/// "My registrations", enabled, opening the registration list — with
+/// "You owe $X" when money is still owed.
+/// [offersLegacySignUp] (way back fix round, Minor 4): the row opens the
+/// registration list while the OLD sign-up page (legacy Sign Up Status, no
+/// new-style registration open) is open, so the list must offer it.
+({
+  String title,
+  String subtitle,
+  bool enabled,
+  bool opensRegistrationList,
+  bool offersLegacySignUp
+})
+    drawerRegistrationRow({
+  required bool signedIn,
+  required bool signUpsOpen,
+  required String signUpDetail,
+  required bool hasOpenRegistrations,
+  required MyRegistrations? mine,
+  String? Function(String sport)? seasonPointer,
+  Set<String>? activeTournamentIds,
+}) {
+  final hasMine = signedIn && (mine?.mine.isNotEmpty ?? false);
+  if (hasMine) {
+    // Fix round, Important 4: "You owe" only for a CURRENT registration
+    // (the same firstCurrentOwing as the home banner).
+    final owing = firstCurrentOwing(mine,
+        seasonPointer: seasonPointer ?? (_) => null,
+        activeTournamentIds: activeTournamentIds);
+    // Final small round, N1: never "Sign Up for" a registration the fan
+    // already joined. In order: owing on a current one; an open one not
+    // joined (mine.openForSignUp); the old-style sign-up; all settled;
+    // anything else.
+    final legacy = signUpsOpen && !hasOpenRegistrations;
+    final unjoined = mine!.openForSignUp;
+    final String subtitle;
+    if (owing != null) {
+      subtitle = 'You owe ${formatOwed(owing.owed)}';
+    } else if (unjoined.length == 1) {
+      subtitle = 'Sign Up for ${unjoined.values.first.label}';
+    } else if (unjoined.isNotEmpty) {
+      subtitle = 'Sign Ups Open';
+    } else if (legacy) {
+      subtitle = signUpDetail;
+    } else if (mine.mine.every((m) => m.chip.settled)) {
+      subtitle = 'All paid up';
+    } else {
+      subtitle = 'View your registrations';
+    }
+    return (
+      title: 'My registrations',
+      subtitle: subtitle,
+      enabled: true,
+      opensRegistrationList: true,
+      offersLegacySignUp: legacy,
+    );
+  }
+  return (
+    title: 'Sign Up List',
+    subtitle: signUpDetail,
+    enabled: signUpsOpen && signedIn,
+    opensRegistrationList: hasOpenRegistrations,
+    offersLegacySignUp: false,
+  );
+}
+
 class _NavBarState extends State<NavBar> {
   String nextleague = "";
   String season = "";
@@ -61,10 +137,77 @@ class _NavBarState extends State<NavBar> {
     super.initState();
     _loadProfilePic = retrieveProfilePic();
     _getSignUpStatus = setUp();
+    // Way back: the fan's own registrations, live. Never awaited — the row
+    // shows today's state at once and updates when they answer.
+    if (signedIn) {
+      try {
+        _mineSub = watchMyRegistrations().listen((m) {
+          if (mounted) setState(() => _myRegistrations = m);
+        }, onError: (Object _) {});
+      } catch (_) {}
+      // Which tournaments are still active (for "current" registrations).
+      try {
+        _tournamentsSub = TournamentService.watchAllTournaments().listen((t) {
+          final ids = TournamentService.activeTournamentIds(t).toSet();
+          if (mounted) setState(() => _activeTournamentIds = ids);
+        }, onError: (Object _) {});
+      } catch (_) {}
+    }
     final uid = FirebaseAuth.instance.currentUser?.uid;
     _insiderStream = (signedIn && uid != null)
         ? InsiderService.watchMyInsider(uid)
         : Stream<Insider?>.value(null);
+    // Fresh reads (Task 4): the drawer opens from the phone's saved copy at
+    // once (refreshing reads, never a server wait) and repaints in place —
+    // one setState, no skeleton — when a newer value arrives while it is
+    // open: the avatar (Users/<uid>), the sign-up row (RegistrationsPublic,
+    // Sign Up Status) and the season pointers behind "Season N+1".
+    if (uid != null) {
+      _stopFollowing.add(FreshReads.onNewer('Users/$uid', (v) {
+        final url = v is Map ? (v['ProfileUrl'] ?? '').toString() : '';
+        if (mounted && url != (profileImagePath ?? '')) {
+          setState(() => profileImagePath = url);
+        }
+      }));
+    }
+    for (final path in ['RegistrationsPublic', 'Sign Ups/Sign Up Status']) {
+      _stopFollowing.add(FreshReads.onNewer(path, (_) => _signUpRow.request()));
+    }
+    SeasonPointers.listenable.addListener(_signUpRow.request);
+  }
+
+  final List<VoidCallback> _stopFollowing = [];
+
+  StreamSubscription<MyRegistrations>? _mineSub;
+  MyRegistrations? _myRegistrations;
+  StreamSubscription<List<Tournament>>? _tournamentsSub;
+  Set<String>? _activeTournamentIds;
+
+  /// One sign-up-row refresh at a time; a change during one queues exactly
+  /// one more (second review, Minor 4 — the bug class).
+  late final CoalescedRefresh _signUpRow = CoalescedRefresh(_refreshSignUpRow);
+
+  @override
+  void dispose() {
+    for (final stop in _stopFollowing) {
+      stop();
+    }
+    _mineSub?.cancel();
+    _tournamentsSub?.cancel();
+    SeasonPointers.listenable.removeListener(_signUpRow.request);
+    _signUpRow.dispose();
+    super.dispose();
+  }
+
+  /// Re-derives the sign-up row from the (now renewed) saved copy and
+  /// repaints it in place.
+  Future<void> _refreshSignUpRow() async {
+    try {
+      await setUp();
+    } catch (_) {
+      return; // a failed re-read keeps the row as it is
+    }
+    if (mounted) setState(() {});
   }
 
   /// Drawer-row subtitle per Insider state (Task F2): null (no subtitle) when
@@ -85,7 +228,7 @@ class _NavBarState extends State<NavBar> {
   Future<void> retrieveProfilePic() async {
     DatabaseReference newClient = FirebaseDatabase.instance.ref();
     if (signedIn) {
-      var event = (await newClient.child("Users/${FirebaseAuth.instance.currentUser?.uid}").once()).snapshot;
+      var event = (await refreshingOnce(newClient.child("Users/${FirebaseAuth.instance.currentUser?.uid}"))).snapshot;
       var player = event.value as Map;
       profileImagePath = player["ProfileUrl"] ?? "";
     }
@@ -305,17 +448,34 @@ class _NavBarState extends State<NavBar> {
                 // this resolves into below.
                 return const SkeletonListTile();
               }
-              signUpEnabled = signUpsOpen && signedIn;
+              final row = drawerRegistrationRow(
+                  signedIn: signedIn,
+                  signUpsOpen: signUpsOpen,
+                  signUpDetail: signUpDetail,
+                  hasOpenRegistrations: openRegistrations.isNotEmpty,
+                  mine: _myRegistrations,
+                  seasonPointer: (sport) =>
+                      SeasonPointers.current.seasonFor(sport),
+                  activeTournamentIds: _activeTournamentIds);
+              signUpEnabled = row.enabled;
               return ListTile(
                 enabled: signUpEnabled,
                 leading: const ImageIcon(AssetImage("assets/events.png"), color: Colors.white,),
-                title: const Text("Sign Up List", style: TextStyle(fontWeight: FontWeight.bold),),
-                subtitle: Text(signUpDetail),
+                title: Text(row.title, style: const TextStyle(fontWeight: FontWeight.bold),),
+                subtitle: Text(row.subtitle),
                 textColor: Colors.white,
                 onTap: () {
                   Navigator.push(context, MaterialPageRoute(builder:(context) {
-                    if (openRegistrations.isNotEmpty) {
-                      return const RegistrationEntryPage();
+                    if (row.opensRegistrationList) {
+                      return RegistrationEntryPage(
+                        legacySignUp: row.offersLegacySignUp
+                            ? (
+                                detail: signUpDetail,
+                                page: (_) => Signup(
+                                    nextleague: nextleague, season: season),
+                              )
+                            : null,
+                      );
                     }
                     return Signup(nextleague: nextleague, season: season);
                   },));

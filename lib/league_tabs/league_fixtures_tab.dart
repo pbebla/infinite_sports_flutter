@@ -13,17 +13,14 @@ import 'package:infinite_sports_flutter/widgets/day_pill_strip.dart';
 /// recomputed from the live match stream on every build:
 /// - default day = a live day if any, else today / nearest upcoming day,
 ///   else the season's last day ([defaultFixturesDay]);
-/// - a day the user tapped sticks for the life of the tab.
+/// - a day the user tapped sticks for the life of the tab; with an owner
+///   ([onDayPicked]) the owner holds the day instead.
 class LeagueFixturesTab extends StatefulWidget {
   final List<TournamentMatch> matches;
   final Map<String, TournamentTeam> teams;
   final Map<String, List<TournamentPlayer>> rosters;
   final String sport;
   final void Function(TournamentMatch match)? onMatchTap;
-
-  /// Team-tap audit (PR feedback): forwarded to the shared [FixturesTab] so
-  /// a card's team name/logo tap opens the league team page.
-  final void Function(TournamentTeam team)? onTeamTap;
 
   /// Predict banner above the day's fixtures (tournament FixturesTab
   /// parity) — shown when the season's predictions are open.
@@ -33,6 +30,13 @@ class LeagueFixturesTab extends StatefulWidget {
   /// Test seam for "today"; production callers leave it null (DateTime.now()).
   final DateTime? now;
 
+  /// Optional owner-held day. When [onDayPicked] is set the owner holds the
+  /// picked day: this tab shows [pickedDay] in place of its own state and
+  /// calls [onDayPicked] on a tap. When it is null the tab holds the day
+  /// itself, as before.
+  final String? pickedDay;
+  final ValueChanged<String>? onDayPicked;
+
   const LeagueFixturesTab({
     super.key,
     required this.matches,
@@ -40,10 +44,11 @@ class LeagueFixturesTab extends StatefulWidget {
     required this.rosters,
     required this.sport,
     this.onMatchTap,
-    this.onTeamTap,
     this.predictionsOpen = false,
     this.onOpenPredict,
     this.now,
+    this.pickedDay,
+    this.onDayPicked,
   });
 
   @override
@@ -62,8 +67,9 @@ class _LeagueFixturesTabState extends State<LeagueFixturesTab> {
       for (final m in widget.matches)
         if (m.matchStatus.isLive) m.date,
     };
-    final selected = (_pickedDay != null && days.contains(_pickedDay))
-        ? _pickedDay
+    final picked = widget.onDayPicked != null ? widget.pickedDay : _pickedDay;
+    final selected = (picked != null && days.contains(picked))
+        ? picked
         : defaultFixturesDay(days, liveDays, now: widget.now);
 
     // No selectable day (no matches / malformed dates): plain full list —
@@ -78,7 +84,14 @@ class _LeagueFixturesTabState extends State<LeagueFixturesTab> {
           DayPillStrip(
             days: days,
             selectedDay: selected,
-            onSelect: (day) => setState(() => _pickedDay = day),
+            onSelect: (day) {
+              final owner = widget.onDayPicked;
+              if (owner != null) {
+                owner(day);
+              } else {
+                setState(() => _pickedDay = day);
+              }
+            },
           ),
         Expanded(
           child: FixturesTab(
@@ -88,7 +101,6 @@ class _LeagueFixturesTabState extends State<LeagueFixturesTab> {
             tournamentId: '',
             sport: widget.sport,
             onMatchTap: widget.onMatchTap,
-            onTeamTap: widget.onTeamTap,
             predictionsOpen: widget.predictionsOpen,
             onOpenPredict: widget.onOpenPredict,
           ),

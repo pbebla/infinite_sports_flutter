@@ -9,6 +9,8 @@ import 'package:infinite_sports_flutter/support/my_tickets_page.dart';
 import 'package:infinite_sports_flutter/support/support_models.dart';
 import 'package:infinite_sports_flutter/support/support_service.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:infinite_sports_flutter/misc/fresh_follow.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 /// The in-app "Help & Feedback" form (spec decision #1) — category cards
 /// with emoji + helper text, required message (≤5,000 chars), up to 5
@@ -44,8 +46,9 @@ class SupportFormPage extends StatefulWidget {
   final String fromScreen;
 
   /// Test seam: replaces [SupportService.createTicket]. Receives the exact
-  /// assembled ticket payload and returns the new reference number.
-  final Future<int> Function({
+  /// assembled ticket payload and returns the new reference number + the
+  /// count of screenshots that couldn't be attached.
+  final Future<SupportTicketResult> Function({
     required String category,
     required String message,
     required List<XFile> screenshots,
@@ -59,7 +62,7 @@ class SupportFormPage extends StatefulWidget {
   })? submitOverride;
 
   /// Test seams for the auto-captured context — production reads
-  /// FirebaseAuth + `Users/<uid>` (name/email/uid via `.once()`),
+  /// FirebaseAuth + `Users/<uid>` (name/email/uid via `refreshingOnce`),
   /// package_info_plus (app version) and dart:io Platform
   /// (platform/device).
   final String? prefillName;
@@ -83,12 +86,14 @@ class SupportFormPage extends StatefulWidget {
   State<SupportFormPage> createState() => _SupportFormPageState();
 }
 
-class _SupportFormPageState extends State<SupportFormPage> {
+class _SupportFormPageState extends State<SupportFormPage>
+    with FreshFollowers {
   final TextEditingController _messageController = TextEditingController();
   String? _category;
   List<XFile> _screenshots = [];
   bool _submitting = false;
   int? _submittedNum; // set → the success body replaces the form
+  int _failedScreenshots = 0;
 
   String _name = '';
   String _email = '';
@@ -124,6 +129,14 @@ class _SupportFormPageState extends State<SupportFormPage> {
     super.dispose();
   }
 
+  /// "First Last" from a `Users/<uid>` value ('' when absent).
+  static String _nameFrom(Object? raw) {
+    if (raw is! Map) return '';
+    final first = raw['First Name']?.toString() ?? '';
+    final last = raw['Last Name']?.toString() ?? '';
+    return [first, last].where((s) => s.isNotEmpty).join(' ');
+  }
+
   static String _bestEffortDevice() {
     try {
       return '${Platform.operatingSystem} ${Platform.operatingSystemVersion}';
@@ -141,14 +154,18 @@ class _SupportFormPageState extends State<SupportFormPage> {
         _name = user?.displayName ?? '';
         if (_name.isEmpty && _uid.isNotEmpty) {
           final snap =
-              (await FirebaseDatabase.instance.ref('Users/$_uid').once())
+              (await refreshingOnce(FirebaseDatabase.instance.ref('Users/$_uid')))
                   .snapshot;
-          final raw = snap.value;
-          if (raw is Map) {
-            final first = raw['First Name']?.toString() ?? '';
-            final last = raw['Last Name']?.toString() ?? '';
-            _name = [first, last].where((s) => s.isNotEmpty).join(' ');
-          }
+          _name = _nameFrom(snap.value);
+          // Own-write row #79 (fresh reads, Task 4): the name is stamped on
+          // the ticket, so a newer one from the server replaces it while
+          // the form is open.
+          final uid = _uid;
+          // FreshFollowers: registers only while mounted, removed on dispose.
+          followNewer('name', 'Users/$uid', (v) {
+            final newer = _nameFrom(v);
+            if (newer.isNotEmpty && mounted) setState(() => _name = newer);
+          });
         }
       }
     } catch (_) {
@@ -219,7 +236,12 @@ class _SupportFormPageState extends State<SupportFormPage> {
         device: _device,
         screen: widget.fromScreen,
       );
-      if (mounted) setState(() => _submittedNum = n);
+      if (mounted) {
+        setState(() {
+          _submittedNum = n.num;
+          _failedScreenshots = n.failedScreenshots;
+        });
+      }
     } on SupportRateLimitException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -235,7 +257,7 @@ class _SupportFormPageState extends State<SupportFormPage> {
     }
   }
 
-  Future<int> _realSubmit({
+  Future<SupportTicketResult> _realSubmit({
     required String category,
     required String message,
     required List<XFile> screenshots,
@@ -524,11 +546,22 @@ class _SupportFormPageState extends State<SupportFormPage> {
         ),
         const SizedBox(height: 10),
         Text(
-          "We've emailed you a copy. Replies land in the app under "
-          "My Tickets, and you'll hear from us there.",
+          "If your account has an email address, we'll send a copy there. "
+          "Replies land in the app under My Tickets, and you'll hear from "
+          "us there.",
           textAlign: TextAlign.center,
           style: TextStyle(color: scheme.onSurfaceVariant),
         ),
+        if (_failedScreenshots > 0) ...[
+          const SizedBox(height: 10),
+          Text(
+            _failedScreenshots == 1
+                ? "1 screenshot couldn't be attached."
+                : "$_failedScreenshots screenshots couldn't be attached.",
+            textAlign: TextAlign.center,
+            style: TextStyle(color: scheme.error),
+          ),
+        ],
         const SizedBox(height: 24),
         FilledButton(
           key: const ValueKey('support_view_tickets_button'),

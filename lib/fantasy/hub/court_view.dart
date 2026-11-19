@@ -14,13 +14,16 @@
 // darker greens in dark mode, brighter in light.
 //
 // Starter slots sit ON the pitch (GK far row, DEF mid, ATT near — fractions
-// from squad_builder_logic.starterOffsets, perspective-mapped); the bench
+// from squad_builder_logic.starterOffsets, perspective-mapped; the Team of
+// the Week share image passes StarterLayout.story for its own rows); the bench
 // lives BELOW on its own visually-distinct surface labeled from the live
 // config ("Bench · 50% points").
 
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
@@ -42,6 +45,16 @@ Color fantasyDownRed(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark
         ? const Color(0xFFFF5252)
         : const Color(0xFFD32F2F);
+
+/// The fantasy "up" green — [fantasyDownRed]'s pair, first used for the
+/// locked court's "came on" badge (a filled disc under a white arrow, on the
+/// pitch artwork and on the bench surface). A brighter green in dark mode, a
+/// deeper one in light, so the disc reads on both surfaces and the white
+/// arrow on it stays clear.
+Color fantasyUpGreen(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+        ? const Color(0xFF43A047)
+        : const Color(0xFF2E7D32);
 
 /// Owner's pick: render his "Neon Gold Isometric Soccer Pitch" artwork as the
 /// pitch instead of the code-drawn trapezoid. Flip to false to fall back to
@@ -68,6 +81,9 @@ class FantasyCourtView extends StatelessWidget {
     this.chipAvatarSize = 58,
     this.showPrices = true,
     this.priceOf,
+    this.starterLayout = StarterLayout.app,
+    this.subbedIn = const {},
+    this.subbedOut = const {},
   });
 
   final FantasyConfig config;
@@ -116,6 +132,18 @@ class FantasyCourtView extends StatelessWidget {
   /// price (read-only viewers of a stored squad).
   final int Function(SquadPick pick)? priceOf;
 
+  /// Where the starters stand: the in-app rows (default), or the Team of
+  /// the Week share image's own ([StarterLayout.story] — only the story
+  /// passes it).
+  final StarterLayout starterLayout;
+
+  /// The locked views' auto-sub badges (auto_sub_view.autoSubDisplay): the
+  /// players who came on as a substitute ("came on", green) and the starters
+  /// they replaced ("went off", the down red). Empty everywhere else — the
+  /// editable court and the share images never pass them.
+  final Set<String> subbedIn;
+  final Set<String> subbedOut;
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -137,74 +165,133 @@ class FantasyCourtView extends StatelessWidget {
     // Perspective-mapped slot rows: the mapping matches whichever pitch is
     // rendered (the asset's measured geometry, or the painter's trapezoid),
     // so hit zones always match the drawn grass.
-    final offsets = starterOffsets(config)
-        .map(useNeonPitchAsset ? pitchAssetPerspective : pitchPerspective)
-        .toList(growable: false);
+    final story = starterLayout == StarterLayout.story;
+    final offsets =
+        (story ? storyStarterOffsets(config) : starterOffsets(config))
+            .map(useNeonPitchAsset ? pitchAssetPerspective : pitchPerspective)
+            .toList(growable: false);
     final starterCount = offsets.length;
 
     final slotStack = Stack(
       children: [
         for (var i = 0; i < starterCount; i++)
           Align(
-            alignment: Alignment(offsets[i].x * 2 - 1, offsets[i].y * 2 - 1),
+            alignment: Alignment(
+                offsets[i].x * 2 - 1, offsets[i].y.clamp(0.0, 1.0) * 2 - 1),
             child: _slotWidget(i),
           ),
       ],
     );
 
-    return Column(
-      children: [
-        AspectRatio(
-          // The asset renders at its own (cropped) aspect; the painter keeps
-          // its 0.78 (taller than wide — room for the big photo chips either
-          // way; the page scrolls).
-          aspectRatio: useNeonPitchAsset ? pitchAssetAspect : 0.78,
-          child: ClipRRect(
+    // The asset renders at its own (cropped) aspect; the painter keeps its
+    // 0.78 (taller than wide, room for the big photo chips either way; the
+    // page scrolls). The court grows taller than that only when its rows
+    // would otherwise not be a whole chip apart (release report #10:
+    // narrow phones / large text); a bounded parent (the share image's own
+    // AspectRatio) caps it.
+    final aspect = useNeonPitchAsset ? pitchAssetAspect : 0.78;
+    final chipHeight = fantasyChipHeightEstimate(
+        chipAvatarSize, MediaQuery.textScalerOf(context));
+    final rowFractions = [for (final o in offsets) o.y.clamp(0.0, 1.0)];
+
+    final bench = slots.length > starterCount
+        ? [
+            const SizedBox(height: 10),
+            _BenchSurface(
+              label: 'Bench · ${config.benchFactorPercent}% points',
+              children: [
+                for (var i = starterCount; i < slots.length; i++)
+                  _slotWidget(i),
+              ],
+            ),
+          ]
+        : const <Widget>[];
+
+    // The in-app courts on the artwork: rows stood by the chips' real size,
+    // every chip on the drawn grass ([appCourtLayout]; owner 2026-11-17).
+    if (!story && useNeonPitchAsset) {
+      return Column(
+        children: [
+          ClipRRect(
             borderRadius: BorderRadius.circular(18),
-            child: useNeonPitchAsset
-                ? Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      // Transparent outside the pitch's gold boundary (the
-                      // artwork's glow halo is masked out) — the surround is
-                      // the theme's own card surface.
-                      ColoredBox(
-                        color: surround,
-                        child: Image.asset(
-                          kNeonPitchAsset,
-                          fit: BoxFit.fill,
-                        ),
-                      ),
-                      slotStack,
-                    ],
-                  )
-                : CustomPaint(
-                    painter: _PitchPainter(
-                      surround: surround,
-                      grassFar: grassFar,
-                      grassNear: grassNear,
-                      stripe: stripe,
-                      lines: lines,
-                      glow: glow,
-                    ),
-                    child: slotStack,
-                  ),
+            child: _AppCourt(
+              flat: starterOffsets(config),
+              children: [
+                // Transparent outside the pitch's gold boundary — the
+                // surround is the theme's own card surface.
+                ColoredBox(
+                  color: surround,
+                  child: Image.asset(kNeonPitchAsset, fit: BoxFit.fill),
+                ),
+                for (var i = 0; i < starterCount; i++) _slotWidget(i),
+              ],
+            ),
           ),
-        ),
-        // No bench slots (the Dream Team's 5-starter mini mode) = no bench
-        // surface at all — an empty labelled shelf would just be noise.
-        if (slots.length > starterCount) ...[
-          const SizedBox(height: 10),
-          _BenchSurface(
-            label: 'Bench · ${config.benchFactorPercent}% points',
-            children: [
-              for (var i = starterCount; i < slots.length; i++)
-                _slotWidget(i),
-            ],
-          ),
+          ...bench,
         ],
-      ],
-    );
+      );
+    }
+
+    // Measured from THIS widget's constraints (a Column child would only
+    // ever see an unbounded height).
+    return LayoutBuilder(builder: (context, constraints) {
+      // The story rows interleave (photos pass beside the row above) on the
+      // artwork's own height — growing by the stacked-rows rule would not
+      // apply to them.
+      var height = story
+          ? constraints.maxWidth / aspect
+          : courtHeightFor(
+              width: constraints.maxWidth,
+              aspect: aspect,
+              rowFractions: rowFractions,
+              chipHeight: chipHeight,
+            );
+      if (constraints.hasBoundedHeight && height > constraints.maxHeight) {
+        height = constraints.maxHeight;
+      }
+      return Column(
+        children: [
+          SizedBox(
+            width: constraints.maxWidth,
+            height: height,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(18),
+              child: useNeonPitchAsset
+                  ? Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        // Transparent outside the pitch's gold boundary (the
+                        // artwork's glow halo is masked out) — the surround is
+                        // the theme's own card surface.
+                        ColoredBox(
+                          color: surround,
+                          child: Image.asset(
+                            kNeonPitchAsset,
+                            fit: BoxFit.fill,
+                          ),
+                        ),
+                        slotStack,
+                      ],
+                    )
+                  : CustomPaint(
+                      painter: _PitchPainter(
+                        surround: surround,
+                        grassFar: grassFar,
+                        grassNear: grassNear,
+                        stripe: stripe,
+                        lines: lines,
+                        glow: glow,
+                      ),
+                      child: slotStack,
+                    ),
+            ),
+          ),
+          // No bench slots (the Dream Team's 5-starter mini mode) = no bench
+          // surface at all — an empty labelled shelf would just be noise.
+          ...bench,
+        ],
+      );
+    });
   }
 
   Widget _slotWidget(int i) {
@@ -229,6 +316,8 @@ class FantasyCourtView extends StatelessWidget {
       isVice: pick.playerId == viceId,
       captainMultiplier: captainMultiplier,
       weekPoints: weekPointsFor?.call(pick.playerId),
+      subbedIn: subbedIn.contains(pick.playerId),
+      subbedOut: subbedOut.contains(pick.playerId),
       onTap: onSlotTap != null
           ? () => onSlotTap!(i)
           : (onPlayerTap == null ? null : () => onPlayerTap!(pick.playerId)),
@@ -236,6 +325,105 @@ class FantasyCourtView extends StatelessWidget {
       avatarSize: chipAvatarSize,
     );
   }
+}
+
+/// The in-app court on the pitch artwork: the first child is the pitch
+/// (filling the court), the rest the starter chips in [starterOffsets]
+/// order. Lays the chips out first, then sizes itself and stands them with
+/// [appCourtLayout] from their REAL sizes — so a taller nameplate (large
+/// text, a wrapped price line) grows the court instead of leaving the grass
+/// or covering the next row.
+class _AppCourt extends MultiChildRenderObjectWidget {
+  const _AppCourt({required this.flat, required super.children});
+
+  final List<({double x, double y})> flat;
+
+  @override
+  _RenderAppCourt createRenderObject(BuildContext context) =>
+      _RenderAppCourt(flat);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderAppCourt renderObject) {
+    renderObject.flat = flat;
+  }
+}
+
+class _AppCourtParentData extends ContainerBoxParentData<RenderBox> {}
+
+class _RenderAppCourt extends RenderBox
+    with
+        ContainerRenderObjectMixin<RenderBox, _AppCourtParentData>,
+        RenderBoxContainerDefaultsMixin<RenderBox, _AppCourtParentData> {
+  _RenderAppCourt(this._flat);
+
+  List<({double x, double y})> _flat;
+  set flat(List<({double x, double y})> value) {
+    if (listEquals(value, _flat)) return;
+    _flat = value;
+    markNeedsLayout();
+  }
+
+  @override
+  void setupParentData(RenderBox child) {
+    if (child.parentData is! _AppCourtParentData) {
+      child.parentData = _AppCourtParentData();
+    }
+  }
+
+  List<RenderBox> get _chips {
+    final out = <RenderBox>[];
+    var child = firstChild == null ? null : childAfter(firstChild!);
+    while (child != null) {
+      out.add(child);
+      child = childAfter(child);
+    }
+    return out;
+  }
+
+  ({double height, List<Offset> origins}) _layout(
+      BoxConstraints constraints, List<Size> chipSizes) {
+    return appCourtLayout(
+      width: constraints.maxWidth,
+      maxHeight: constraints.maxHeight,
+      chips: chipSizes,
+      flat: _flat.take(chipSizes.length).toList(growable: false),
+    );
+  }
+
+  @override
+  Size computeDryLayout(covariant BoxConstraints constraints) {
+    final loose = BoxConstraints(maxWidth: constraints.maxWidth);
+    final sizes = [for (final c in _chips) c.getDryLayout(loose)];
+    return constraints.constrain(
+        Size(constraints.maxWidth, _layout(constraints, sizes).height));
+  }
+
+  @override
+  void performLayout() {
+    final loose = BoxConstraints(maxWidth: constraints.maxWidth);
+    final chips = _chips;
+    for (final c in chips) {
+      c.layout(loose, parentUsesSize: true);
+    }
+    final placed = _layout(constraints, [for (final c in chips) c.size]);
+    size = constraints.constrain(Size(constraints.maxWidth, placed.height));
+    final pitch = firstChild;
+    if (pitch != null) {
+      pitch.layout(BoxConstraints.tight(size));
+      (pitch.parentData! as _AppCourtParentData).offset = Offset.zero;
+    }
+    for (var i = 0; i < chips.length; i++) {
+      (chips[i].parentData! as _AppCourtParentData).offset = placed.origins[i];
+    }
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) =>
+      defaultPaint(context, offset);
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) =>
+      defaultHitTestChildren(result, position: position);
 }
 
 /// The bench's own surface — visually distinct from the pitch so "these two
@@ -409,8 +597,7 @@ class _PitchPainter extends CustomPainter {
     canvas.drawLine(
         Offset(cx - nearHalf, bottomY), Offset(cx + nearHalf, bottomY), line);
     canvas.drawArc(
-      Rect.fromCircle(
-          center: Offset(cx, bottomY), radius: size.width * 0.14),
+      Rect.fromCircle(center: Offset(cx, bottomY), radius: size.width * 0.14),
       math.pi,
       math.pi,
       false,

@@ -19,7 +19,7 @@
 // land on My Team — where the pay card, or the freshly unlocked court, is.
 
 /// The hub's tabs, in TabBar order (the index IS the tab position).
-enum FantasyHubTab { myTeam, players, leaderboards, news, rules }
+enum FantasyHubTab { myTeam, players, league, leaderboards, news, rules }
 
 /// A resolved fantasy push tap: which hub to open and where.
 class FantasyHubRoute {

@@ -486,6 +486,98 @@ void main() {
         expect(settled.chipTextFor('Ava'), isNull);
       });
 
+      // Task 4 (substitute plan): the court needs the rows its lines came
+      // from, to show who came on for an absent starter.
+      test('rows: the live squad\'s slots while live, History\'s once settled',
+          () {
+        final subRow = LiveSlot(
+            playerId: 'Bench Bob',
+            countedTenths: 50,
+            multiplier: 1,
+            autoSubbedIn: true,
+            replacesId: 'Deb');
+        final live = resolve(
+            sources: LockedWeekSources(
+                live: liveState(),
+                liveSquad: LiveSquad(
+                    totalTenths: 210,
+                    week: 21,
+                    slots: [slot('Ava', 160, x: 2), slot('Deb', 0), subRow]),
+                published: lockedSquad()));
+        expect(live.rows.map((r) => r.playerId), ['Ava', 'Deb', 'Bench Bob']);
+        expect(live.rows.last.replacesId, 'Deb');
+
+        final settled = resolve(
+            sources: LockedWeekSources(
+                history: HistoryWeek(
+                    totalTenths: 210,
+                    slots: [slot('Ava', 160, x: 2), subRow],
+                    squad: lockedSquad())));
+        expect(settled.rows.map((r) => r.playerId), ['Ava', 'Bench Bob']);
+      });
+
+      test(
+          'rows: empty whenever no lines are shown (voided, waiting, unknown, '
+          'invalid, no locked squad) and only for players in the squad', () {
+        final published = lockedSquad();
+        final history =
+            HistoryWeek(totalTenths: 0, voided: true, slots: [slot('Ava', 1)]);
+        expect(
+            resolve(sources: LockedWeekSources(history: history)).rows,
+            isEmpty);
+        expect(
+            resolve(
+                    voided: {3},
+                    sources: LockedWeekSources(
+                        live: liveState(),
+                        liveSquad: liveSquad(),
+                        published: published))
+                .rows,
+            isEmpty);
+        expect(resolve(sources: LockedWeekSources(published: published)).rows,
+            isEmpty);
+        expect(
+            resolve(
+                    sources: LockedWeekSources(
+                        liveSquad: liveSquad(), published: published))
+                .rows,
+            isEmpty);
+        expect(
+            resolve(
+                    sources: LockedWeekSources(
+                        live: liveState(), liveSquad: liveSquad()))
+                .rows,
+            isEmpty,
+            reason: 'no locked squad on screen owns the rows');
+        // Invalid: live (a squad with no slots) and settled (the marker),
+        // even with the locked squad on screen.
+        expect(
+            resolve(
+                    sources: LockedWeekSources(
+                        live: liveState(),
+                        liveSquad: const LiveSquad(
+                            totalTenths: 0, week: 0, slots: []),
+                        published: published))
+                .rows,
+            isEmpty);
+        expect(
+            resolve(
+                    sources: LockedWeekSources(
+                        history: HistoryWeek(
+                            totalTenths: 0,
+                            invalid: true,
+                            slots: [slot('Ava', 1)],
+                            squad: published)))
+                .rows,
+            isEmpty);
+        final partial = resolve(
+            sources: LockedWeekSources(
+                live: liveState(),
+                liveSquad: liveSquad(),
+                published: lockedSquad(ids: ['Ava', 'Bench Bob'])));
+        expect(partial.rows.map((r) => r.playerId), ['Ava', 'Bench Bob']);
+      });
+
       test('a line is only for a player IN the locked squad', () {
         final m = resolve(
             sources: LockedWeekSources(

@@ -1,6 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:infinite_sports_flutter/misc/insider_service.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
 import 'package:infinite_sports_flutter/registration/dynamic_form.dart';
@@ -24,12 +24,19 @@ import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 /// applies to the Insider's own individual fee, enforced by
 /// [insiderTierDiscountApplies]), and null there too when signed out or the
 /// account has never applied to the program.
+///
+/// [checked] (fresh reads, Task 3): the promo and the Insider record both
+/// set the amount owed, so they must come from the server. false = one of
+/// them is the phone's saved copy or a failed read — the form is NOT shown
+/// (the "couldn't load your registration" state with Retry instead), so
+/// nobody submits or pays on an unconfirmed discount.
 typedef _LoadedForm = ({
   List<RegQuestion> questions,
   Map<String, dynamic> prefill,
   FirstTimerResult firstTimerResult,
   RegPromo promo,
   Insider? insider,
+  bool checked,
 });
 
 /// The discount stamp [RegistrationFormPage._resolveDiscountStamp] settles
@@ -102,44 +109,54 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
     // Lockdown B4: the first-timer match runs server-side (checkFirstTimer
     // callable) against the same two signals the old client scan used —
     // the account's email and the profile phone already loaded as prefill.
-    final firstTimerResult = _showPromoField
-        ? await RegistrationService.checkFirstTimer(
-            email: FirebaseAuth.instance.currentUser?.email ?? '',
-            phone: (prefill['phone'] ?? '').toString())
-        : const FirstTimerResult(isFirstTimer: true);
-    final promo = _showPromoField
-        ? await RegistrationService.getPromo(widget.regId)
-        : const RegPromo();
-    // Task F5 — the Insider tier discount only ever applies on the
-    // individual path (spec §2), so every other path skips this read.
-    final insider =
-        widget.path == 'individual' ? await _loadMyInsider() : null;
+    // The callable and the two server-first reads run together (one round
+    // trip, one bound offline).
+    final results = await Future.wait<Object>([
+      _showPromoField
+          ? RegistrationService.checkFirstTimer(
+              email: FirebaseAuth.instance.currentUser?.email ?? '',
+              phone: (prefill['phone'] ?? '').toString())
+          : Future.value(const FirstTimerResult(isFirstTimer: true)),
+      _showPromoField
+          ? RegistrationService.getPromo(widget.regId)
+          : Future.value((promo: const RegPromo(), checked: true)),
+      // Task F5 — the Insider tier discount only ever applies on the
+      // individual path (spec §2), so every other path skips this read.
+      widget.path == 'individual'
+          ? _loadMyInsider()
+          : Future.value((insider: null, checked: true)),
+    ]);
+    final promo = results[1] as ({RegPromo promo, bool checked});
+    final insider = results[2] as ({Insider? insider, bool checked});
     return (
       questions: visible,
       prefill: prefill,
-      firstTimerResult: firstTimerResult,
-      promo: promo,
-      insider: insider,
+      firstTimerResult: results[0] as FirstTimerResult,
+      promo: promo.promo,
+      insider: insider.insider,
+      checked: promo.checked && insider.checked,
     );
   }
 
-  /// One-shot read of the signed-in account's own Insider record via
-  /// [InsiderService.watchMyInsider]'s first emission — null when signed
-  /// out, never applied, or on a stream error (defensive: a broken read
-  /// here should never block registration, it just means no tier discount
-  /// preview/stamp this session).
-  Future<Insider?> _loadMyInsider() async {
+  /// Server-first read of the signed-in account's own Insider record
+  /// (fresh reads, Task 3 — it was `watchMyInsider(uid).first`, i.e. the
+  /// saved copy). null when signed out or never applied. Not from the
+  /// server, or a failed read, is `checked: false`: the form waits for a
+  /// confirmed answer instead of stamping (or dropping) a tier discount on
+  /// a guess.
+  Future<({Insider? insider, bool checked})> _loadMyInsider() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return null;
+    if (uid == null) return (insider: null, checked: true);
     try {
-      return await InsiderService.watchMyInsider(uid).first;
+      final r = await serverFirstValue('Insiders/$uid');
+      return (insider: Insider.fromFirebase(uid, r.value), checked: r.fromServer);
     } catch (_) {
-      return null;
+      return (insider: null, checked: false);
     }
   }
 
-  Future<bool> _submitForPath(
-      Map<String, dynamic> answers, _DiscountStamp stamp) {
+  Future<SubmitOutcome> _submitForPath(Map<String, dynamic> answers,
+      _DiscountStamp stamp, Map<String, dynamic> prefill) {
     switch (widget.path) {
       case 'captain':
         return RegistrationService.submitCaptain(
@@ -152,6 +169,7 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
           discountSource: stamp.discountSource,
           discountPct: stamp.discountPct,
           eligibleFee: stamp.eligibleFee,
+          prefill: prefill,
         );
       case 'joiner':
         return RegistrationService.submitJoiner(
@@ -159,6 +177,7 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
           config: widget.config,
           team: widget.team!,
           answers: answers,
+          prefill: prefill,
         );
       default:
         return RegistrationService.submitIndividual(
@@ -170,6 +189,7 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
           discountSource: stamp.discountSource,
           discountPct: stamp.discountPct,
           eligibleFee: stamp.eligibleFee,
+          prefill: prefill,
         );
     }
   }
@@ -236,13 +256,38 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
     final promo =
         answers.remove(kInsiderPromoAnswerKey) as InsiderPromoOutcome?;
     final stamp = await _resolveDiscountStamp(promo);
-    final ok = await _submitForPath(answers, stamp);
+    // The write-back only writes what the fan changed from the prefill
+    // (fresh reads, Task 3, #75).
+    final outcome =
+        await _submitForPath(answers, stamp, (await _load).prefill);
     if (!mounted) return;
-    if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text(
-              'Something went wrong — try again, and contact us if it keeps failing.')));
-      return;
+    switch (outcome) {
+      case SubmitOutcome.ok:
+        break;
+      case SubmitOutcome.alreadyRegistered:
+        // Fresh reads, Task 3 (#74): a submission already exists (another
+        // device, an admin, or this fan's own earlier submit whose legacy
+        // dual-write failed) — nothing is overwritten. The existing
+        // "already registered" route: the status page, which fills in a
+        // missing legacy Sign Ups entry itself on open (review fix Minor 1)
+        // — not awaited here, so an offline retry never waits a second
+        // bound before the page opens (second review, Minor 3).
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+              builder: (_) => RegistrationStatusPage(
+                  regId: widget.regId, config: widget.config)),
+          (route) => route.isFirst,
+        );
+        return;
+      case SubmitOutcome.couldNotCheck:
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text(kRegistrationCouldNotCheck)));
+        return;
+      case SubmitOutcome.failed:
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                'Something went wrong — try again, and contact us if it keeps failing.')));
+        return;
     }
     // Task F5 — a brief confirmation before navigating away; the payment
     // screen's itemized breakdown (payment_screen.dart _amountCard) is the
@@ -264,6 +309,11 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
       paid: bornPaid,
       paidVia: bornPaid ? 'team code' : '',
       submittedAt: DateTime.now().millisecondsSinceEpoch,
+      // The discount stamp just written — a 100% discount owes nothing, so
+      // it must not land on a "Total due $0.00" payment screen.
+      discountSource: stamp.discountSource,
+      discountPct: stamp.discountPct,
+      eligibleFee: stamp.eligibleFee,
     );
     // A successful submission ends the registration flow — clear the whole
     // entry -> path -> [join code] -> form stack underneath so the back
@@ -273,10 +323,11 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
     // opened from the drawer, or the Matches tab's nested navigator when
     // opened from the frontpage banner) landing on that navigator's home
     // route.
-    if (paymentOwed(
-        config: widget.config,
-        submission: submission,
-        codeWaivesPayment: waived)) {
+    if (discountedAmountOwed(
+            config: widget.config,
+            submission: submission,
+            codeWaivesPayment: waived) >
+        0) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(
             builder: (_) => PaymentScreen(
@@ -284,6 +335,11 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
                 config: widget.config,
                 amount: amountOwed(
                     config: widget.config,
+                    submission: submission,
+                    codeWaivesPayment: waived),
+                // Second review, Important 2: follows the live config.
+                amountFor: (c) => amountOwed(
+                    config: c,
                     submission: submission,
                     codeWaivesPayment: waived),
                 fromSubmission: true)),
@@ -349,7 +405,9 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
                 firstTimerResult: const FirstTimerResult(isFirstTimer: true),
                 promo: const RegPromo(),
                 insider: null,
+                checked: true,
               );
+          if (!loaded.checked) return _loadFailedBody();
           if (loaded.questions.isEmpty) {
             return const Center(
                 child: Text(
@@ -383,6 +441,31 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
             ],
           );
         },
+      ),
+    );
+  }
+
+  /// The discount reads could not be confirmed with the server (fresh
+  /// reads, Task 3): the same "couldn't load your registration" state with
+  /// Retry as the payment and status pages.
+  Widget _loadFailedBody() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text("Couldn't load your registration. Try again.",
+                textAlign: TextAlign.center),
+            const SizedBox(height: 12),
+            OutlinedButton(
+              onPressed: () => setState(() {
+                _load = _loadAll();
+              }),
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -25,6 +25,8 @@ import 'package:infinite_sports_flutter/profile/profile_tab.dart';
 import 'package:infinite_sports_flutter/profile/stats_tab.dart';
 import 'package:infinite_sports_flutter/widgets/share_profile_card.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
+import 'package:infinite_sports_flutter/misc/fresh_follow.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 // ─── Human-readable labels for stat keys (shared across ProfileTab + StatsTab) ─
 const Map<String, String> _statLabel = {
@@ -87,6 +89,12 @@ class ProfilePage extends StatefulWidget {
   /// A limited profile never has a Fantasy tab, so it takes none.
   final FantasyProfileSeams? fantasySeams;
 
+  /// Test seam (second review, Important 1): replaces the career reads —
+  /// the profile node / team nodes / TournamentsPlayed, tournament bundles
+  /// and AFC seasons + rosters — so the real load AND the in-place reload
+  /// run without Firebase. null = Firebase.
+  final ProfileCareerSources? careerSources;
+
   /// Test seam: replaces the system share sheet behind the app-bar Share
   /// icon (it receives the PNG, the caption and the icon's iPad popover
   /// anchor). null = the real share sheet.
@@ -97,6 +105,7 @@ class ProfilePage extends StatefulWidget {
       required this.uid,
       this.loadOverride,
       this.careerLoadOverride,
+      this.careerSources,
       this.fantasySeams,
       this.share})
       : _isLimited = false,
@@ -109,6 +118,7 @@ class ProfilePage extends StatefulWidget {
         _limitedName = name,
         loadOverride = null,
         careerLoadOverride = null,
+        careerSources = null,
         fantasySeams = null,
         share = null;
 
@@ -116,6 +126,74 @@ class ProfilePage extends StatefulWidget {
   /// TournamentService.clearProfileUrlCache). Call after a sign-out or when
   /// profile data must be refetched; tests call it between cases.
   static void clearCareerCache() => _careerCache.clear();
+
+  /// Whether a newer server value at [path] can change a career built from
+  /// [reads] (the normalized paths it read — second review, Important 1:
+  /// this player's own profile node, team nodes, AFC rosters and
+  /// tournaments, not every roster in the app). A newer value AT a read
+  /// path, ABOVE one (an ancestor another screen follows) or BELOW one
+  /// counts.
+  @visibleForTesting
+  static bool careerReadsAffected(Set<String> reads, String path) {
+    if (path.isEmpty) return false;
+    for (final r in reads) {
+      if (r == path || r.startsWith('$path/') || path.startsWith('$r/')) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Session cache drop (survey list B): a newer value drops only the
+  /// cached careers that were built from it, so their next visit re-reads.
+  /// App lifetime; started by the first profile (lazy static).
+  static final VoidCallback _careerCacheFollow =
+      FreshReads.onNewerUnder('', (path, _) {
+    for (final uid in _careerReads.keys.toList()) {
+      if (careerReadsAffected(_careerReads[uid]!, path)) {
+        _careerReads.remove(uid);
+        _careerCache.remove(uid);
+      }
+    }
+  });
+
+  /// Minimum time between two in-place reloads of an open profile (a live
+  /// game changes Line Ups every few seconds; the profile must not thrash).
+  static const Duration kProfileReloadGap = Duration(seconds: 2);
+
+  /// Test seam: the league goals of the first Futsal season competition in
+  /// [uid]'s CACHED career (null = not cached / none).
+  @visibleForTesting
+  static num? debugCachedLeagueGoals(String uid) =>
+      _leagueGoals(_careerCache[uid]?.competitions);
+
+  /// Test seam: the same, from the most recently opened profile's SHOWN
+  /// career.
+  @visibleForTesting
+  static num? debugShownLeagueGoals() => _leagueGoals(_debugShown?.call());
+
+  static List<CompetitionStats> Function()? _debugShown;
+
+  static num? _leagueGoals(List<CompetitionStats>? competitions) {
+    if (competitions == null) return null;
+    for (final c in competitions) {
+      if (c.label.contains('· Season')) return c.stats['goals'];
+    }
+    return null;
+  }
+
+  /// Test seam: the cached career's sizes for [uid] (null = not cached).
+  @visibleForTesting
+  static ({int stints, int competitions, int appearances})? debugCachedCounts(
+      String uid) {
+    final c = _careerCache[uid];
+    if (c == null) return null;
+    return (
+      stints: c.stints.length,
+      competitions: c.competitions.length,
+      appearances: c.tournamentAppearances.length,
+    );
+  }
 
   @override
   State<ProfilePage> createState() => _ProfilePageState();
@@ -168,8 +246,13 @@ class _ProfilePageState extends State<ProfilePage>
   int _selectedStatsIndex = 0;
 
   // sport → seasonNum → (teamName, teamColor, Player)
-  final Map<String, Map<String, (String, Color, Player)>> _tableEntries = {};
-  final Map<String, String> _sportPositions = {};
+  Map<String, Map<String, (String, Color, Player)>> _tableEntries = {};
+  Map<String, String> _sportPositions = {};
+
+  /// Normalized database paths the shown career was built from (second
+  /// review, Important 1): only a newer value at one of them (or above /
+  /// below one) reloads the profile.
+  Set<String> _readPaths = {};
 
   // ── Built data structures ───────────────────────────────────────────────
   List<ParticipationStint> _stints = [];
@@ -180,9 +263,78 @@ class _ProfilePageState extends State<ProfilePage>
   String? _currentTeamNumber;
   String? _currentStatsLabel;
 
+  /// Stops the in-place repaint follower (fresh reads, Task 4).
+  VoidCallback? _stopNewerFollow;
+  Timer? _repaintDebounce;
+
+  /// One reload at a time; a newer value during one queues exactly one
+  /// more; reloads at most every [ProfilePage.kProfileReloadGap] (second review,
+  /// Important 1 / Minor 4).
+  late final CoalescedRefresh _reload =
+      CoalescedRefresh(_repaintInPlace, minGap: ProfilePage.kProfileReloadGap);
+
+  /// Fresh reads (Task 4, survey list C): while this profile is open, a
+  /// newer server value for a path THIS career was built from (or its own
+  /// profile node) reloads it IN PLACE — identity and career are rebuilt
+  /// into fresh collections and swapped in with one setState; scroll and
+  /// tab are kept. Debounced (300 ms) and coalesced.
+  void _onNewerPath(String path, Object? _) {
+    final own = normalizeFreshPath(profileNodePathFor(widget.uid));
+    final mine = path == own || path.startsWith('$own/');
+    final building = _building;
+    final affects = mine ||
+        ProfilePage.careerReadsAffected(_readPaths, path) ||
+        (building != null &&
+            ProfilePage.careerReadsAffected(building.readPaths, path));
+    if (!affects) return;
+    _careerCache.remove(widget.uid);
+    _careerReads.remove(widget.uid);
+    if (!_careerLoaded) {
+      // Final round, item 1: a newer value during the FIRST load (the
+      // career is not on screen yet) is remembered; one reload runs right
+      // after the first commit (_loadCareer).
+      _newerDuringFirstLoad = true;
+      return;
+    }
+    _scheduleReload();
+  }
+
+  /// The same debounced, coalesced path every reload takes.
+  void _scheduleReload() {
+    _repaintDebounce?.cancel();
+    _repaintDebounce =
+        Timer(const Duration(milliseconds: 300), _reload.request);
+  }
+
+  /// The career build in progress (its read paths count for newer values
+  /// that arrive while it runs).
+  _CareerWork? _building;
+
+  /// A newer value arrived before the first career appeared.
+  bool _newerDuringFirstLoad = false;
+
+  /// Test seam target (ProfilePage.debugShownLeagueGoals).
+  List<CompetitionStats> _shownCompetitions() => _competitions;
+
+  Future<void> _repaintInPlace() async {
+    if (!mounted || !_careerLoaded) return;
+    final read = await _readIdentity();
+    final id = read.identity;
+    // A failed or timed-out identity read keeps what is on screen.
+    if (!mounted || id == null) return;
+    await _loadCareer(identity: id); // one setState at its end
+  }
+
   @override
   void initState() {
     super.initState();
+    ProfilePage._careerCacheFollow;
+    ProfilePage._debugShown = _shownCompetitions;
+    if (!widget._isLimited &&
+        widget.uid.trim().isNotEmpty &&
+        widget.loadOverride == null) {
+      _stopNewerFollow = FreshReads.onNewerUnder('', _onNewerPath);
+    }
     // The Fantasy tab (round 3) exists only on full (uid) profiles. start()
     // runs BEFORE the listener is attached so a synchronous (session-cached)
     // decision never calls setState inside initState — it is simply read
@@ -242,6 +394,12 @@ class _ProfilePageState extends State<ProfilePage>
 
   @override
   void dispose() {
+    _stopNewerFollow?.call();
+    _repaintDebounce?.cancel();
+    _reload.dispose();
+    if (ProfilePage._debugShown == _shownCompetitions) {
+      ProfilePage._debugShown = null;
+    }
     _fantasy
       ?..removeListener(_onFantasyChanged)
       ..dispose();
@@ -254,14 +412,14 @@ class _ProfilePageState extends State<ProfilePage>
 
   // ─── Helper: extract league player stats ───────────────────────────────
 
-  Future<(String, Color, Player)> _extractHelper(
+  Future<(String, Color, Player)> _extractHelper(_CareerWork w,
       String sport, String season, String team) async {
     // Logos are cosmetic: a read with no answer (offline) never holds the
     // career reveal — the stint just has no logo.
     await getAllTeamLogo()
         .bounded('ProfilePage: team logos', orElse: () {});
     // Color extraction is deferred — we only decode the CURRENT stint's logo
-    // once, after _current is determined. Use a placeholder here so we don't
+    // once, after w.current is determined. Use a placeholder here so we don't
     // download + decode every logo for every season.
     const Color placeholder = Color(0xFFD00000);
     (String, Color, Player) data;
@@ -275,9 +433,9 @@ class _ProfilePageState extends State<ProfilePage>
             final logoUrl =
                 (teamLogos[sport]?[season]?[team])?.toString() ?? '';
             info.teamPath = logoUrl;
-            if (_firstName.isEmpty && info.name.contains(' ')) {
-              _firstName = info.name.split(' ')[0];
-              _lastName = info.name.split(' ').sublist(1).join(' ');
+            if (w.firstName.isEmpty && info.name.contains(' ')) {
+              w.firstName = info.name.split(' ')[0];
+              w.lastName = info.name.split(' ').sublist(1).join(' ');
             }
             data = (team, placeholder, info);
             break;
@@ -294,9 +452,9 @@ class _ProfilePageState extends State<ProfilePage>
             final logoUrl =
                 (teamLogos[sport]?[season]?[team])?.toString() ?? '';
             info.teamPath = logoUrl;
-            if (_firstName.isEmpty && info.name.contains(' ')) {
-              _firstName = info.name.split(' ')[0];
-              _lastName = info.name.split(' ').sublist(1).join(' ');
+            if (w.firstName.isEmpty && info.name.contains(' ')) {
+              w.firstName = info.name.split(' ')[0];
+              w.lastName = info.name.split(' ').sublist(1).join(' ');
             }
             data = (team, placeholder, info);
             break;
@@ -314,9 +472,9 @@ class _ProfilePageState extends State<ProfilePage>
             final logoUrl =
                 (teamLogos[sport]?[season]?[team])?.toString() ?? '';
             info.teamPath = logoUrl;
-            if (_firstName.isEmpty && info.name.contains(' ')) {
-              _firstName = info.name.split(' ')[0];
-              _lastName = info.name.split(' ').sublist(1).join(' ');
+            if (w.firstName.isEmpty && info.name.contains(' ')) {
+              w.firstName = info.name.split(' ')[0];
+              w.lastName = info.name.split(' ').sublist(1).join(' ');
             }
             data = (team, placeholder, info);
             break;
@@ -327,56 +485,67 @@ class _ProfilePageState extends State<ProfilePage>
     return data;
   }
 
-  Future<(String, Color, Player)> _extractPlayerStats(
+  Future<(String, Color, Player)> _extractPlayerStats(_CareerWork w,
       String sport, String season, String team) async {
-    var val = await _extractHelper(sport, season, team);
+    var val = await _extractHelper(w, sport, season, team);
     if (val.$1 != '') return val;
 
     // Try other teams in case player transferred
     if (sport == 'Basketball') {
       for (final other in (basketballLineups[season] ?? {}).keys) {
         if (other == team) continue;
-        val = await _extractHelper(sport, season, other);
+        val = await _extractHelper(w, sport, season, other);
         if (val.$1 != '') return val;
       }
     } else if (sport == 'Futsal') {
       for (final other in (futsalLineups[season] ?? {}).keys) {
         if (other == team) continue;
-        val = await _extractHelper(sport, season, other);
+        val = await _extractHelper(w, sport, season, other);
         if (val.$1 != '') return val;
       }
     } else if (sport == 'Flag Football') {
       for (final other in (flagFootballLineups[season] ?? {}).keys) {
         if (other == team) continue;
-        val = await _extractHelper(sport, season, other);
+        val = await _extractHelper(w, sport, season, other);
         if (val.$1 != '') return val;
       }
     }
     return val;
   }
 
-  Future<void> _extractAFCStats() async {
+  Future<void> _extractAFCStats(_CareerWork w) async {
     try {
       // Bounded one-shot reads (bounded_read.dart): offline, no answer =
       // no AFC stints, never a held career reveal.
-      final seasons = await getSoccerSeasons('AFC San Jose')
+      final src = widget.careerSources;
+      w.readPaths.add('AFC San Jose/Seasons');
+      final seasons = await (src != null
+              ? src.afcSeasons()
+              : getSoccerSeasons('AFC San Jose'))
           .bounded('ProfilePage: AFC seasons');
       // Each season's roster read is independent — fetch them concurrently.
       await Future.wait(seasons.map((season) async {
-        final roster = await getSoccerRoster('AFC San Jose', season).bounded(
+        w.readPaths.add('AFC San Jose/Seasons/$season/Roster');
+        final roster = await (src != null
+                ? src.afcRoster(season)
+                : getSoccerRoster('AFC San Jose', season))
+            .bounded(
             'ProfilePage: AFC roster $season',
             orElse: () => <String, SoccerPlayer>{});
         roster.forEach((name, info) {
           if (info.uid == widget.uid) {
-            _tableEntries['AFC San Jose'] ??= {};
-            _tableEntries['AFC San Jose']![season] =
+            w.tableEntries['AFC San Jose'] ??= {};
+            w.tableEntries['AFC San Jose']![season] =
                 (season, Colors.white, info);
           }
         });
       }));
     } on TimeoutException {
-      _careerDegraded = true;
-    } catch (_) {}
+      w.degraded = true;
+    } catch (_) {
+      // A swallowed failure: a RELOAD with it does not commit.
+      w.failed = true;
+    }
   }
 
   // ─── Stat map builders ──────────────────────────────────────────────────
@@ -485,26 +654,26 @@ class _ProfilePageState extends State<ProfilePage>
 
   // ─── Main data load ──────────────────────────────────────────────────────
 
-  List<({String label, String value})> _buildHeadlineStats() {
-    if (_current == null) return [];
+  List<({String label, String value})> _buildHeadlineStats(_CareerWork w) {
+    if (w.current == null) return [];
 
     Map<String, num> statMap;
     String sport;
     String position;
 
-    if (_current!.isTournament) {
-      final ta = _findTournamentAppearance(_current!.scopeId);
+    if (w.current!.isTournament) {
+      final ta = _findTournamentAppearance(w, w.current!.scopeId);
       if (ta == null) return [];
       statMap = _tournamentPlayerStatMap(ta.player);
       sport = ta.sport;
       position = ta.position;
     } else {
-      sport = _current!.sport;
-      position = _current!.position;
-      final seasons = _tableEntries[sport];
+      sport = w.current!.sport;
+      position = w.current!.position;
+      final seasons = w.tableEntries[sport];
       if (seasons == null || seasons.isEmpty) return [];
       // Show only the current season stats, not career totals
-      final currentSeasonEntry = seasons[_current!.label];
+      final currentSeasonEntry = seasons[w.current!.label];
       if (currentSeasonEntry != null) {
         statMap = _buildStatMapForSingleEntry(sport, currentSeasonEntry.$3);
       } else {
@@ -515,23 +684,15 @@ class _ProfilePageState extends State<ProfilePage>
     final group = positionGroup(sport, position);
     final priority = profileStatPriority(sport, group);
 
-    final result = <({String label, String value})>[];
-    for (final key in priority) {
-      if (statMap.containsKey(key)) {
-        result.add((
+    // Priority stats first, then any other non-zero stat; never padded
+    // with a "—" column (release report #2) — two stats → two columns.
+    return [
+      for (final key in pickHeadlineStatKeys(priority, statMap))
+        (
           label: _statLabel[key] ?? key,
           value: formatProfileStatValue(key, statMap[key]!),
-        ));
-        if (result.length == 3) break;
-      }
-    }
-
-    // Pad to 3 if fewer than 3 keys are present
-    while (result.length < 3) {
-      result.add((label: '—', value: '—'));
-    }
-
-    return result;
+        ),
+    ];
   }
 
   /// Build stat map from a single Player entry (for current season card).
@@ -588,14 +749,16 @@ class _ProfilePageState extends State<ProfilePage>
     }
   }
 
-  _TournamentAppearance? _findTournamentAppearance(String tournamentId) {
-    return _tournamentAppearancesCache
+  _TournamentAppearance? _findTournamentAppearance(
+      _CareerWork w, String tournamentId) {
+    return w.appearances
         .where((ta) => ta.tournamentId == tournamentId)
         .firstOrNull;
   }
 
-  // Cache set during getProfileData so later build steps can reference it.
-  final List<_TournamentAppearance> _tournamentAppearancesCache = [];
+  // The shown career's tournament appearances (swapped in whole by
+  // _applyCareer — a reload never appends to it).
+  List<_TournamentAppearance> _tournamentAppearancesCache = [];
 
   // ─── Build ────────────────────────────────────────────────────────────────
 
@@ -885,7 +1048,7 @@ class _ProfilePageState extends State<ProfilePage>
       }
       return v;
     }
-    _tournamentAppearancesCache.clear();
+    _tournamentAppearancesCache = [];
     // Phase 1 (fast): identity — the only thing gating first paint.
     await _loadIdentity();
     // Phase 2 (slow): career — deliberately not awaited.
@@ -919,15 +1082,10 @@ class _ProfilePageState extends State<ProfilePage>
     _profileUrl = snap.profileUrl;
     _information = snap.information;
     _awards = snap.awards;
-    _tableEntries
-      ..clear()
-      ..addAll(snap.tableEntries);
-    _sportPositions
-      ..clear()
-      ..addAll(snap.sportPositions);
-    _tournamentAppearancesCache
-      ..clear()
-      ..addAll(snap.tournamentAppearances);
+    _tableEntries = Map.of(snap.tableEntries);
+    _sportPositions = Map.of(snap.sportPositions);
+    _tournamentAppearancesCache = List.of(snap.tournamentAppearances);
+    _readPaths = Set.of(_careerReads[widget.uid] ?? const <String>{});
     _stints = snap.stints;
     _competitions = snap.competitions;
     _current = snap.current;
@@ -957,48 +1115,44 @@ class _ProfilePageState extends State<ProfilePage>
 
   // ─── Phase 1: identity ────────────────────────────────────────────────────
 
-  Future<void> _loadIdentity() async {
-    // ── 1. Load the profile node ─────────────────────────────────────────
+  /// Reads a value: through [ProfilePage.careerSources] in tests, else a
+  /// refreshing read (fresh reads, Task 4).
+  Future<Object?> _readValue(String path) async {
+    final src = widget.careerSources;
+    if (src != null) return src.read(normalizeFreshPath(path));
+    return (await refreshingOnce(FirebaseDatabase.instance.ref(path)))
+        .snapshot
+        .value;
+  }
+
+  /// Phase 1, read only: the profile node as an [_Identity] (null = failed
+  /// read; `timedOut` = no answer within the bound).
+  Future<({_Identity? identity, bool timedOut})> _readIdentity() async {
     // DB lockdown B1: Users/{uid} stays for the viewer's OWN profile (its
     // owner may always read it); any other uid reads the PublicProfiles
     // mirror, which carries the exact same keys this page uses (First/Last
     // Name, ProfileUrl, Information, Played, Awards).
-    final ref = FirebaseDatabase.instance.ref();
     final Map rawUser;
     try {
       // Bounded (bounded_read.dart): this read gates the page's first paint
-      // and a cold offline once() never answers. No answer — or a failed
+      // and a cold offline read may never answer. No answer — or a failed
       // read — keeps whatever identity is already on screen (a cache-hit
       // refresh must never blank the cached name); a first visit then shows
       // the empty page instead of a skeleton forever.
-      final userSnap = (await ref
-              .child(profileNodePathFor(widget.uid))
-              .once()
-              .bounded('ProfilePage: profile node'))
-          .snapshot;
-      rawUser = userSnap.value as Map? ?? {};
+      final value = await _readValue(profileNodePathFor(widget.uid))
+          .bounded('ProfilePage: profile node');
+      rawUser = value as Map? ?? {};
     } on TimeoutException {
-      _careerDegraded = true;
-      return;
+      return (identity: null, timedOut: true);
     } catch (_) {
-      return;
+      return (identity: null, timedOut: false);
     }
-
-    _firstName = (rawUser['First Name'] ?? '').toString();
-    _lastName = (rawUser['Last Name'] ?? '').toString();
-    _profileUrl = (rawUser['ProfileUrl'] ?? '').toString();
-    _information = (rawUser['Information'] is Map)
-        ? rawUser['Information'] as Map
-        : {};
-    // Kept for phase 2's league-appearance fetches.
-    _rawPlayed = (rawUser['Played'] is Map) ? rawUser['Played'] as Map : {};
-
-    // ── 2. Awards ────────────────────────────────────────────────────────
-    // Awards live inside the Users/{uid} node already fetched above, so the
+    // Awards live inside the profile node already fetched above, so the
     // trophy cabinet renders with phase 1 at no extra read.
+    var awards = <Award>[];
     try {
       if (rawUser['Awards'] is Map) {
-        _awards = (rawUser['Awards'] as Map)
+        awards = (rawUser['Awards'] as Map)
             .entries
             .where((e) => e.value is Map)
             .map((e) => Award.fromMap(
@@ -1008,64 +1162,150 @@ class _ProfilePageState extends State<ProfilePage>
             .toList();
       }
     } catch (_) {
-      _awards = [];
+      awards = [];
     }
+    return (
+      identity: _Identity(
+        firstName: (rawUser['First Name'] ?? '').toString(),
+        lastName: (rawUser['Last Name'] ?? '').toString(),
+        profileUrl: (rawUser['ProfileUrl'] ?? '').toString(),
+        information: (rawUser['Information'] is Map)
+            ? rawUser['Information'] as Map
+            : {},
+        rawPlayed: (rawUser['Played'] is Map) ? rawUser['Played'] as Map : {},
+        awards: rawUser['Awards'] is Map ? awards : null,
+      ),
+      timedOut: false,
+    );
+  }
+
+  void _applyIdentity(_Identity id) {
+    _firstName = id.firstName;
+    _lastName = id.lastName;
+    _profileUrl = id.profileUrl;
+    _information = id.information;
+    // Kept for phase 2's league-appearance fetches.
+    _rawPlayed = id.rawPlayed;
+    final awards = id.awards;
+    if (awards != null) _awards = awards;
+  }
+
+  Future<void> _loadIdentity() async {
+    final read = await _readIdentity();
+    if (read.timedOut) _careerDegraded = true;
+    final id = read.identity;
+    if (id != null) _applyIdentity(id);
   }
 
   // ─── Phase 2: career ──────────────────────────────────────────────────────
 
-  Future<void> _loadCareer() async {
+  /// Phase 2 (and every in-place reload): the whole career is built into a
+  /// FRESH [_CareerWork] — never appended to what is on screen — and swapped
+  /// in (with [identity], when a reload re-read it) in ONE setState (second
+  /// review, Important 1). A failed build keeps what is shown.
+  Future<void> _loadCareer({_Identity? identity}) async {
+    final w = _CareerWork(
+      rawPlayed: identity?.rawPlayed ?? _rawPlayed,
+      information: identity?.information ?? _information,
+      firstName: identity?.firstName ?? _firstName,
+      lastName: identity?.lastName ?? _lastName,
+    )..degraded = identity == null ? _careerDegraded : false;
+    w.readPaths.add(normalizeFreshPath(profileNodePathFor(widget.uid)));
+    _building = w;
     var ok = true;
     Future<Color?>? colorFuture;
     Color? color;
     try {
       // The three data groups are independent — run them concurrently.
       await Future.wait([
-        _loadLeagueAppearances(),
-        _extractAFCStats(),
-        _loadTournamentAppearances(),
+        _loadLeagueAppearances(w),
+        _extractAFCStats(w),
+        _loadTournamentAppearances(w),
       ]);
-      await _buildCareer();
+      await _buildCareer(w);
       // Team color joins the same reveal: the logo decode gets a short grace
       // window, then we reveal with the default tint and never flip it later
       // — a late tint change is exactly the staged look the single reveal
       // exists to avoid.
-      colorFuture = _resolveTeamColor();
+      colorFuture = _resolveTeamColor(w);
       color = await colorFuture.timeout(
           const Duration(milliseconds: 300), onTimeout: () => null);
-      if (color != null) _teamColor = color;
     } catch (_) {
-      // A failed load must not be cached — the next visit refetches.
       ok = false;
+    }
+    // Final round, item 2: a RELOAD commits only when every read it needed
+    // succeeded; otherwise the career on screen stays as it was (an error is
+    // not a fact) and the next newer value or the next visit tries again.
+    // The FIRST load keeps its existing behaviour (shows what it has).
+    final isReload = identity != null;
+    if (isReload && (!ok || w.failed || w.degraded)) {
+      if (identical(_building, w)) _building = null;
+      return;
+    }
+    void apply() {
+      if (identity != null) _applyIdentity(identity);
+      if (ok) _applyCareer(w, color);
+      _careerDegraded = w.degraded;
+      _careerLoaded = true;
+    }
+
+    // Single reveal / single swap: career sections, hero stats and tint all
+    // land in this one setState.
+    if (mounted) {
+      setState(apply);
+    } else {
+      apply();
+    }
+    if (identical(_building, w)) _building = null;
+    if (_newerDuringFirstLoad) {
+      // Final round, item 1: the first career is already older than the
+      // server — do not cache it; reload once, in place (the reload caches).
+      _newerDuringFirstLoad = false;
       _careerCache.remove(widget.uid);
+      _careerReads.remove(widget.uid);
+      if (mounted) _scheduleReload();
+      return;
     }
-    if (ok && _careerDegraded) {
-      // Shown, but not remembered: a timed-out read means this career is
-      // incomplete (offline first visit); caching it would restore an empty
-      // career for the rest of the session.
+    if (!ok || _careerDegraded) {
+      // A failed or timed-out (offline) career is shown but never cached —
+      // the next visit refetches instead of restoring an empty career.
       _careerCache.remove(widget.uid);
+      _careerReads.remove(widget.uid);
+      return;
     }
-    if (ok && !_careerDegraded) {
-      _careerCache[widget.uid] = _snapshotCareer();
-      if (color == null && colorFuture != null) {
-        // Too late for this visit's reveal, but cache hits render the tint
-        // from their first frame.
-        unawaited(colorFuture.then((c) {
-          final snap = _careerCache[widget.uid];
-          if (c != null && snap != null) snap.teamColor = c;
-        }));
-      }
+    _careerCache[widget.uid] = _snapshotCareer();
+    _careerReads[widget.uid] = Set.of(_readPaths);
+    if (color == null && colorFuture != null) {
+      // Too late for this visit's reveal, but cache hits render the tint
+      // from their first frame.
+      unawaited(colorFuture.then((c) {
+        final snap = _careerCache[widget.uid];
+        if (c != null && snap != null) snap.teamColor = c;
+      }));
     }
-    if (!mounted) return;
-    // Single reveal: career sections, hero stats and tint all land in this
-    // one setState.
-    setState(() => _careerLoaded = true);
   }
 
-  Future<void> _loadLeagueAppearances() async {
+  /// Swaps a finished [_CareerWork] in as the shown career.
+  void _applyCareer(_CareerWork w, Color? color) {
+    _firstName = w.firstName;
+    _lastName = w.lastName;
+    _tableEntries = w.tableEntries;
+    _sportPositions = w.sportPositions;
+    _tournamentAppearancesCache = w.appearances;
+    _readPaths = w.readPaths;
+    _stints = w.stints;
+    _current = w.current;
+    _currentTeamNumber = w.currentTeamNumber;
+    _competitions = w.competitions;
+    _currentStatsLabel = w.currentStatsLabel;
+    _headlineStats = w.headlineStats;
+    if (color != null) _teamColor = color;
+  }
+
+  Future<void> _loadLeagueAppearances(_CareerWork w) async {
     try {
       final tasks = <Future<void>>[];
-      for (final entry in _rawPlayed.entries) {
+      for (final entry in w.rawPlayed.entries) {
         final sport = entry.key.toString();
         final seasons = entry.value;
         if (seasons is! Map) continue;
@@ -1077,9 +1317,9 @@ class _ProfilePageState extends State<ProfilePage>
           if (sport == 'Futsal' ||
               sport == 'Basketball' ||
               sport == 'Flag Football') {
-            _sportPositions[sport] =
-                (_information['${sport}Position'] ?? '').toString();
-            tasks.add(_loadLeagueSeason(sport, seasonNum, team));
+            w.sportPositions[sport] =
+                (w.information['${sport}Position'] ?? '').toString();
+            tasks.add(_loadLeagueSeason(w, sport, seasonNum, team));
           }
         }
       }
@@ -1087,10 +1327,13 @@ class _ProfilePageState extends State<ProfilePage>
       // (futsalLineups[season] etc. in utility.dart), so the fetches are
       // safe to run in parallel instead of the old sequential forEach.
       await Future.wait(tasks);
-    } catch (_) {}
+    } catch (_) {
+      // A swallowed failure: a RELOAD with it does not commit.
+      w.failed = true;
+    }
   }
 
-  Future<void> _loadLeagueSeason(
+  Future<void> _loadLeagueSeason(_CareerWork w,
       String sport, String seasonNum, String team) async {
     try {
       // Targeted read first: phase 1's Played map already names the player's
@@ -1099,16 +1342,17 @@ class _ProfilePageState extends State<ProfilePage>
       // every player) just to extract this one row.
       // (A team read with no answer — offline — throws, skipping the
       // whole-season fallback too: it would hang the same way.)
-      final targeted = await _extractFromTeamNode(sport, seasonNum, team);
+      final targeted = await _extractFromTeamNode(w, sport, seasonNum, team);
       if (targeted != null) {
-        _tableEntries[sport] ??= {};
-        _tableEntries[sport]![seasonNum] = targeted;
+        w.tableEntries[sport] ??= {};
+        w.tableEntries[sport]![seasonNum] = targeted;
         return;
       }
       // Fallback (team renamed / legacy data / player transferred): the old
       // whole-season fetch through the shared lineup caches, which also
       // searches the season's other teams. Bounded like every career read.
       final what = 'ProfilePage: $sport $seasonNum Line Ups';
+      w.readPaths.add('$sport/$seasonNum/Line Ups');
       if (sport == 'Futsal') {
         await getAllFutsalLineUps(seasonNum).bounded(what);
       } else if (sport == 'Basketball') {
@@ -1116,12 +1360,15 @@ class _ProfilePageState extends State<ProfilePage>
       } else {
         await getAllFlagFootballLineUps(seasonNum).bounded(what);
       }
-      _tableEntries[sport] ??= {};
-      _tableEntries[sport]![seasonNum] =
-          await _extractPlayerStats(sport, seasonNum, team);
+      w.tableEntries[sport] ??= {};
+      w.tableEntries[sport]![seasonNum] =
+          await _extractPlayerStats(w, sport, seasonNum, team);
     } on TimeoutException {
-      _careerDegraded = true;
-    } catch (_) {}
+      w.degraded = true;
+    } catch (_) {
+      // A swallowed failure: a RELOAD with it does not commit.
+      w.failed = true;
+    }
   }
 
   /// Reads `/<Sport>/<season>/Line Ups/<team>` (one team's node) and pulls
@@ -1129,15 +1376,12 @@ class _ProfilePageState extends State<ProfilePage>
   /// the player isn't on it — callers fall back to the whole-season path. A
   /// read with no answer (offline, bounded) THROWS [TimeoutException] so the
   /// caller skips that fallback too.
-  Future<(String, Color, Player)?> _extractFromTeamNode(
+  Future<(String, Color, Player)?> _extractFromTeamNode(_CareerWork w,
       String sport, String season, String team) async {
     try {
-      final snap = (await FirebaseDatabase.instance
-              .ref('/$sport/$season/Line Ups/$team')
-              .once()
-              .bounded('ProfilePage: $sport $season $team'))
-          .snapshot;
-      final node = snap.value;
+      w.readPaths.add('$sport/$season/Line Ups/$team');
+      final node = await _readValue('/$sport/$season/Line Ups/$team')
+          .bounded('ProfilePage: $sport $season $team');
       if (node is! Map) return null;
       for (final e in node.entries) {
         final info = e.value;
@@ -1148,9 +1392,9 @@ class _ProfilePageState extends State<ProfilePage>
         final logoUrl = (teamLogos[sport]?[season]?[team])?.toString() ?? '';
         final player =
             _parseLeaguePlayer(sport, e.key.toString(), info, logoUrl);
-        if (_firstName.isEmpty && player.name.contains(' ')) {
-          _firstName = player.name.split(' ')[0];
-          _lastName = player.name.split(' ').sublist(1).join(' ');
+        if (w.firstName.isEmpty && player.name.contains(' ')) {
+          w.firstName = player.name.split(' ')[0];
+          w.lastName = player.name.split(' ').sublist(1).join(' ');
         }
         // Same placeholder color as _extractHelper — the real decode is the
         // current stint's only, in _resolveTeamColor.
@@ -1228,7 +1472,7 @@ class _ProfilePageState extends State<ProfilePage>
     return p;
   }
 
-  Future<void> _loadTournamentAppearances() async {
+  Future<void> _loadTournamentAppearances(_CareerWork w) async {
     try {
       // TournamentsPlayed index (written by the Manager when a roster entry
       // is linked): Users/<uid>/TournamentsPlayed/<tournamentId>: true.
@@ -1238,12 +1482,10 @@ class _ProfilePageState extends State<ProfilePage>
       // Lockdown B1: own profile reads Users, visited profiles read the
       // PublicProfiles mirror (TournamentsPlayed is mirrored verbatim).
       // Bounded like every career read: no answer = no appearances.
-      final idxSnap = (await FirebaseDatabase.instance
-              .ref('${profileNodePathFor(widget.uid)}/TournamentsPlayed')
-              .once()
-              .bounded('ProfilePage: TournamentsPlayed'))
-          .snapshot;
-      final index = idxSnap.value;
+      final idxPath = '${profileNodePathFor(widget.uid)}/TournamentsPlayed';
+      w.readPaths.add(normalizeFreshPath(idxPath));
+      final index = await _readValue(idxPath)
+          .bounded('ProfilePage: TournamentsPlayed');
       if (index is! Map) return;
       // Fetch only the indexed tournaments, concurrently. Ids that no longer
       // resolve (deleted tournaments) are skipped.
@@ -1252,21 +1494,25 @@ class _ProfilePageState extends State<ProfilePage>
           // One whole-node read per tournament (iOS overlapping-get() fix —
           // see TournamentService.getTournamentBundle). Parallel ACROSS
           // tournaments stays fine: different ids never overlap.
-          final bundle = await TournamentService.getTournamentBundle(
-                  id.toString())
+          w.readPaths.add('Tournaments/$id');
+          final src = widget.careerSources;
+          final bundle = await (src != null
+                  ? src.tournamentBundle(id.toString())
+                  : TournamentService.getTournamentBundle(id.toString()))
               .bounded('ProfilePage: tournament $id');
           final tournament = bundle.tournament;
           if (tournament == null) return;
           final teams = bundle.teams;
           // Photos never gate: no answer keeps the rosters as they are.
-          final rosters =
-              await TournamentService.enrichRosterPhotos(bundle.rosters)
+          final rosters = src != null
+              ? bundle.rosters
+              : await TournamentService.enrichRosterPhotos(bundle.rosters)
                   .bounded('ProfilePage: tournament $id photos',
                       orElse: () => bundle.rosters);
           for (final entry in rosters.entries) {
             for (final player in entry.value) {
               if (player.uid == widget.uid) {
-                _tournamentAppearancesCache.add(_TournamentAppearance(
+                w.appearances.add(_TournamentAppearance(
                   tournamentId: tournament.id,
                   tournamentName: tournament.name,
                   sport: tournament.sport,
@@ -1283,21 +1529,26 @@ class _ProfilePageState extends State<ProfilePage>
               }
             }
           }
-        } catch (_) {}
+        } catch (_) {
+          w.failed = true; // a RELOAD with it does not commit
+        }
       }));
     } on TimeoutException {
-      _careerDegraded = true;
-    } catch (_) {}
+      w.degraded = true;
+    } catch (_) {
+      // A swallowed failure: a RELOAD with it does not commit.
+      w.failed = true;
+    }
   }
 
-  Future<void> _buildCareer() async {
+  Future<void> _buildCareer(_CareerWork w) async {
     // ── 6. Build stints ──────────────────────────────────────────────────
     final stints = <ParticipationStint>[];
 
     // Memoize getCurrentSeason results — avoids one await per (sport × season).
     final Map<String, String> cachedCurrentSeason = {};
 
-    for (final sportEntry in _tableEntries.entries) {
+    for (final sportEntry in w.tableEntries.entries) {
       final sport = sportEntry.key;
 
       // Fetch current season ONCE per sport.
@@ -1309,6 +1560,7 @@ class _ProfilePageState extends State<ProfilePage>
               .bounded('ProfilePage: $sport current season');
         } catch (_) {
           cachedCurrentSeason[sport] = '';
+          w.failed = true; // a RELOAD with it does not commit
         }
       }
       final currentSeasonForSport = cachedCurrentSeason[sport] ?? '';
@@ -1327,13 +1579,15 @@ class _ProfilePageState extends State<ProfilePage>
                     ? isAFCSeasonFinished(seasonNum)
                     : isSeasonFinished(sport, seasonNum))
                 .bounded('ProfilePage: $sport $seasonNum Finished'));
-          } catch (_) {}
+          } catch (_) {
+            w.failed = true; // a RELOAD with it does not commit
+          }
         }
 
-        final position = _sportPositions[sport] ??
+        final position = w.sportPositions[sport] ??
             (sport == 'AFC San Jose'
-                ? (_information['SoccerPosition'] ?? '').toString()
-                : (_information['${sport}Position'] ?? '').toString());
+                ? (w.information['SoccerPosition'] ?? '').toString()
+                : (w.information['${sport}Position'] ?? '').toString());
 
         stints.add(ParticipationStint(
           sport: sport,
@@ -1346,7 +1600,7 @@ class _ProfilePageState extends State<ProfilePage>
       }
     }
 
-    for (final ta in _tournamentAppearancesCache) {
+    for (final ta in w.appearances) {
       final sortKey =
           int.tryParse(ta.edition.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
       stints.add(ParticipationStint(
@@ -1361,32 +1615,32 @@ class _ProfilePageState extends State<ProfilePage>
       ));
     }
 
-    _stints = stints;
-    _current = currentParticipation(_stints);
+    w.stints = stints;
+    w.current = currentParticipation(w.stints);
 
     // ── 8. Jersey number for current team ────────────────────────────────
-    if (_current != null) {
-      if (_current!.isTournament) {
-        final ta = _findTournamentAppearance(_current!.scopeId);
+    if (w.current != null) {
+      if (w.current!.isTournament) {
+        final ta = _findTournamentAppearance(w, w.current!.scopeId);
         if (ta != null && ta.number.isNotEmpty) {
-          _currentTeamNumber = ta.number;
+          w.currentTeamNumber = ta.number;
         }
       } else {
         // League players all have a `number` field on the Player model.
         final entry =
-            _tableEntries[_current!.sport]?[_current!.label];
+            w.tableEntries[w.current!.sport]?[w.current!.label];
         if (entry != null && entry.$1.isNotEmpty) {
           final player = entry.$3;
           // All league player models implement Player which has `number`.
           if (player is FutsalPlayer && player.number.isNotEmpty) {
-            _currentTeamNumber = player.number;
+            w.currentTeamNumber = player.number;
           } else if (player is BasketballPlayer && player.number.isNotEmpty) {
-            _currentTeamNumber = player.number;
+            w.currentTeamNumber = player.number;
           } else if (player is FlagFootballPlayer &&
               player.number.isNotEmpty) {
-            _currentTeamNumber = player.number;
+            w.currentTeamNumber = player.number;
           } else if (player is SoccerPlayer && player.number.isNotEmpty) {
-            _currentTeamNumber = player.number;
+            w.currentTeamNumber = player.number;
           }
         }
       }
@@ -1396,12 +1650,12 @@ class _ProfilePageState extends State<ProfilePage>
     final competitions = <CompetitionStats>[];
 
     // League seasons — one entry per season per sport.
-    for (final sportEntry in _tableEntries.entries) {
+    for (final sportEntry in w.tableEntries.entries) {
       final sport = sportEntry.key;
       final seasonMap = sportEntry.value;
       final position = sport == 'AFC San Jose'
-          ? (_information['SoccerPosition'] ?? '').toString()
-          : (_sportPositions[sport] ?? '');
+          ? (w.information['SoccerPosition'] ?? '').toString()
+          : (w.sportPositions[sport] ?? '');
 
       for (final seasonEntry in seasonMap.entries) {
         final seasonNum = seasonEntry.key;
@@ -1433,7 +1687,7 @@ class _ProfilePageState extends State<ProfilePage>
     }
 
     // Tournament appearances — one entry per appearance.
-    for (final ta in _tournamentAppearancesCache) {
+    for (final ta in w.appearances) {
       final sortKey =
           int.tryParse(ta.edition.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
       competitions.add(CompetitionStats(
@@ -1449,24 +1703,24 @@ class _ProfilePageState extends State<ProfilePage>
 
     // Sort latest first.
     competitions.sort((a, b) => b.sortKey.compareTo(a.sortKey));
-    _competitions = competitions;
+    w.competitions = competitions;
 
     // ── 10. Current-season stats label + headline stats ───────────────────
-    if (_current != null) {
-      if (_current!.isTournament) {
-        final ta = _findTournamentAppearance(_current!.scopeId);
-        _currentStatsLabel = ta?.tournamentName ?? _current!.label;
+    if (w.current != null) {
+      if (w.current!.isTournament) {
+        final ta = _findTournamentAppearance(w, w.current!.scopeId);
+        w.currentStatsLabel = ta?.tournamentName ?? w.current!.label;
       } else {
-        final sport = _current!.sport;
-        final seasonNum = _current!.label;
+        final sport = w.current!.sport;
+        final seasonNum = w.current!.label;
         if (sport == 'AFC San Jose') {
-          _currentStatsLabel = 'AFC San Jose Season $seasonNum';
+          w.currentStatsLabel = 'AFC San Jose Season $seasonNum';
         } else {
-          _currentStatsLabel = '$sport League Season $seasonNum';
+          w.currentStatsLabel = '$sport League Season $seasonNum';
         }
       }
     }
-    _headlineStats = _buildHeadlineStats();
+    w.headlineStats = _buildHeadlineStats(w);
   }
 
   // ─── Team color (hero tint) ───────────────────────────────────────────────
@@ -1476,9 +1730,9 @@ class _ProfilePageState extends State<ProfilePage>
   // _extractHelper calls stored a placeholder color; this single real
   // ColorScheme decode replaces it. Never setStates on its own — _loadCareer
   // races it against a grace window so the tint is part of the one reveal.
-  Future<Color?> _resolveTeamColor() async {
-    if (_current == null || _current!.isTournament) return null;
-    final entry = _tableEntries[_current!.sport]?[_current!.label];
+  Future<Color?> _resolveTeamColor(_CareerWork w) async {
+    if (w.current == null || w.current!.isTournament) return null;
+    final entry = w.tableEntries[w.current!.sport]?[w.current!.label];
     if (entry == null || entry.$1.isEmpty) return null;
     final logoUrl = entry.$3 is FutsalPlayer
         ? (entry.$3 as FutsalPlayer).teamPath
@@ -1508,6 +1762,76 @@ class _ProfilePageState extends State<ProfilePage>
 // Users/{uid} read refreshes identity behind it. Never persisted to disk.
 
 final Map<String, _CareerSnapshot> _careerCache = {};
+
+/// The paths each cached career was built from (uid → normalized paths).
+final Map<String, Set<String>> _careerReads = {};
+
+/// Test seam: the reads behind a profile's career.
+class ProfileCareerSources {
+  const ProfileCareerSources({
+    required this.read,
+    required this.tournamentBundle,
+    required this.afcSeasons,
+    required this.afcRoster,
+  });
+
+  /// A value by normalized path (profile node, team node, TournamentsPlayed).
+  final Future<Object?> Function(String path) read;
+  final Future<TournamentBundle> Function(String id) tournamentBundle;
+  final Future<List<String>> Function() afcSeasons;
+  final Future<Map<String, SoccerPlayer>> Function(String season) afcRoster;
+}
+
+/// Phase 1's data, read before it is applied.
+class _Identity {
+  const _Identity({
+    required this.firstName,
+    required this.lastName,
+    required this.profileUrl,
+    required this.information,
+    required this.rawPlayed,
+    required this.awards,
+  });
+  final String firstName;
+  final String lastName;
+  final String profileUrl;
+  final Map<dynamic, dynamic> information;
+  final Map<dynamic, dynamic> rawPlayed;
+
+  /// null = the node had no Awards map (the shown awards are kept, as
+  /// before).
+  final List<Award>? awards;
+}
+
+/// One career build, into FRESH collections (second review, Important 1):
+/// swapped in whole by _applyCareer, never appended to what is shown.
+class _CareerWork {
+  _CareerWork({
+    required this.rawPlayed,
+    required this.information,
+    required this.firstName,
+    required this.lastName,
+  });
+  final Map<dynamic, dynamic> rawPlayed;
+  final Map<dynamic, dynamic> information;
+  String firstName;
+  String lastName;
+  bool degraded = false;
+
+  /// A sub-read failed and was swallowed (the first load still shows what
+  /// it has; a reload with it does not commit — final round, item 2).
+  bool failed = false;
+  final Set<String> readPaths = {};
+  final Map<String, Map<String, (String, Color, Player)>> tableEntries = {};
+  final Map<String, String> sportPositions = {};
+  final List<_TournamentAppearance> appearances = [];
+  List<ParticipationStint> stints = [];
+  ParticipationStint? current;
+  String? currentTeamNumber;
+  List<CompetitionStats> competitions = [];
+  String? currentStatsLabel;
+  List<({String label, String value})> headlineStats = [];
+}
 
 class _CareerSnapshot {
   final String firstName;

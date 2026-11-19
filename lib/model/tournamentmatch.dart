@@ -1,3 +1,4 @@
+import 'package:infinite_sports_flutter/misc/futsal_periods.dart';
 import 'package:infinite_sports_flutter/misc/match_clock.dart';
 import 'package:infinite_sports_flutter/misc/match_location.dart';
 import 'package:infinite_sports_flutter/misc/parse_helpers.dart';
@@ -36,6 +37,10 @@ class TournamentMatch {
   /// (fromFirebase never reads it — tournaments have no forfeits).
   final int? forfeitedBy;
 
+  /// Futsal league games only: the half the Manager has the game in. Null for
+  /// old games (no `Period` on the node), other sports and tournaments.
+  final FutsalPeriodInfo? periodInfo;
+
   const TournamentMatch({
     required this.id,
     required this.stage,
@@ -61,6 +66,7 @@ class TournamentMatch {
     this.team1Source,
     this.team2Source,
     this.forfeitedBy,
+    this.periodInfo,
   });
 
   /// A league game decided by forfeit — displays label it "5–0 · Forfeit".

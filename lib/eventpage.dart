@@ -17,9 +17,8 @@ import 'package:infinite_sports_flutter/model/attendee.dart';
 import 'package:infinite_sports_flutter/model/event.dart';
 import 'package:infinite_sports_flutter/model/myuser.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
-import 'package:infinite_sports_flutter/registration/registration_path_page.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
-import 'package:infinite_sports_flutter/registration/registration_status_page.dart';
+import 'package:infinite_sports_flutter/registration/registration_open.dart';
 import 'package:infinite_sports_flutter/misc/ics.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:path_provider/path_provider.dart';
@@ -37,6 +36,8 @@ class EventPage extends StatefulWidget {
     this.flyerDownloader,
     this.tempDirectory,
     this.shareSheet,
+    this.loadUsers,
+    this.mySubmissionFor,
   }) : assert(index != null || v2Id != null);
 
   final int? index;
@@ -52,6 +53,14 @@ class EventPage extends StatefulWidget {
   final Future<Directory> Function()? tempDirectory;
   final ShareSheet? shareSheet;
 
+  /// Test seam replacing [getAllUsers] (null = attendee names couldn't be
+  /// loaded).
+  final Future<Map<String, MyUser>?> Function()? loadUsers;
+
+  /// Test seam: the signed-in fan's own submission for a registration
+  /// (null = RegistrationService.watchMySubmission).
+  final Stream<RegSubmission?> Function(String regId)? mySubmissionFor;
+
   @override
   _EventPageState createState() => _EventPageState();
 }
@@ -59,19 +68,74 @@ class EventPage extends StatefulWidget {
 class _EventPageState extends State<EventPage> {
   bool attending = false;
   bool _reminding = false;
+
+  /// True while Register checks the registration with the server.
+  bool _registering = false;
+
+  /// Way back (owner-approved 2026-11-14): the fan's own submission for
+  /// this event's registration, LIVE — the button reads "View my
+  /// registration" when there is one (open OR closed). Display only: the
+  /// tap still decides server-first (checkEntry).
+  Stream<RegSubmission?>? _mine;
+  String? _mineRegId;
+
+  Stream<RegSubmission?> _mineFor(String regId) {
+    if (_mine == null || _mineRegId != regId) {
+      _mineRegId = regId;
+      try {
+        _mine = (widget.mySubmissionFor ??
+                RegistrationService.watchMySubmission)(regId)
+            .handleError((Object _) {}); // a failed read: no guess
+      } catch (_) {
+        _mine = Stream<RegSubmission?>.value(null);
+      }
+    }
+    return _mine!;
+  }
   final NotificationPrefs _notifPrefs = NotificationPrefs();
   late Event event;
   // Live record: attend/edit changes appear without reopening the page.
   Stream<Event?>? _eventStream;
-  Future<Map<String, MyUser>>? _users;
+
+  /// Attendee names/photos (PublicProfiles mirror). null until the first
+  /// load answers; [_usersFailed] when it failed / timed out — then the
+  /// attendee list says so and the next live event update retries.
+  Map<String, MyUser>? _users;
+  bool _usersFailed = false;
+  bool _usersLoading = false;
 
   @override
   void initState() {
     super.initState();
     _loadReminding();
-    _eventStream = widget.eventStream ??
+    final source = widget.eventStream ??
         watchEvent(v2Id: widget.v2Id, legacyIndex: widget.index);
-    _users = getAllUsers();
+    _eventStream = source.map((event) {
+      if (_usersFailed) _loadUsers();
+      return event;
+    });
+    _loadUsers();
+  }
+
+  Future<void> _loadUsers() async {
+    if (_usersLoading) return;
+    _usersLoading = true;
+    Map<String, MyUser>? users;
+    try {
+      users = await (widget.loadUsers ?? getAllUsers)();
+    } catch (_) {
+      users = null;
+    }
+    _usersLoading = false;
+    if (!mounted) return;
+    setState(() {
+      if (users == null) {
+        _usersFailed = true;
+      } else {
+        _users = users;
+        _usersFailed = false;
+      }
+    });
   }
 
   /// Attendees live under the record the page was opened from.
@@ -215,26 +279,30 @@ class _EventPageState extends State<EventPage> {
   /// Same routing the registrations hub uses: status page if this user
   /// already submitted, otherwise the registration flow. Falls back to a
   /// snackbar when the linked registration has closed.
+  ///
+  /// Fresh reads (Task 3, #72/#74): the config (its open state and fee,
+  /// passed into the whole flow) and the "already registered?" answer must
+  /// come from the server — a saved copy or a failed read shows "couldn't
+  /// check" instead of letting the fan in on an old fee or back into the
+  /// form over an existing submission. [registrationRoute] decides.
+  ///
+  /// Final small round, N7: the routing is the shared
+  /// [RegistrationOpen.open] (the same outcomes as before), so "couldn't
+  /// check" now has a Try again — which comes back here, through this
+  /// page's own spinner and one-tap guard.
   Future<void> _register() async {
+    if (_registering) return;
     final regId = event.registrationId!;
-    Map<String, RegistrationConfig> open = {};
+    setState(() => _registering = true);
     try {
-      open = await RegistrationService.getOpenRegistrations();
-    } catch (_) {}
-    if (!mounted) return;
-    final config = open[regId];
-    if (config == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Registration is closed')));
-      return;
+      // Both checks at once (checkEntry): one round trip online, one bound
+      // offline.
+      await RegistrationOpen.open(context, regId, onRetry: () {
+        if (mounted) _register();
+      });
+    } finally {
+      if (mounted) setState(() => _registering = false);
     }
-    final existing = await RegistrationService.getMySubmission(regId);
-    if (!mounted) return;
-    Navigator.push(context, MaterialPageRoute(builder: (_) {
-      return existing != null
-          ? RegistrationStatusPage(regId: regId, config: config)
-          : RegistrationPathPage(regId: regId, config: config);
-    }));
   }
 
   /// Round icon buttons for phone/social contact, only for filled fields.
@@ -353,14 +421,16 @@ class _EventPageState extends State<EventPage> {
     return StreamBuilder<Event?>(
       stream: _eventStream,
       builder: (context, eventSnapshot) {
-        return FutureBuilder(
-          future: _users,
-          builder: (context, snapshot) {
-        if (!eventSnapshot.hasData || !snapshot.hasData) {
+        return Builder(
+          builder: (context) {
+        // First reveal waits for the names (single fade, no name pop-in);
+        // a FAILED names load reveals the page and says so below.
+        if (!eventSnapshot.hasData || (_users == null && !_usersFailed)) {
           return _skeleton(context);
         }
         event = eventSnapshot.data ?? Event();
-        Map<String, MyUser> users = snapshot.data!;
+        final users = _users ?? const <String, MyUser>{};
+        final namesMissing = _users == null;
         List<Attendee> attendees = List.empty(growable: true);
         // Recomputed on every live update so un-attending elsewhere is
         // reflected here too.
@@ -398,7 +468,11 @@ class _EventPageState extends State<EventPage> {
                   // Attend/Share, address, then the write-up.
                   event.imageSrc ?? SizedBox(width: 0, height: 0),
                   if (event.registrationId?.isNotEmpty ?? false)
-                    Padding(
+                    StreamBuilder<RegSubmission?>(
+                      stream: _mineFor(event.registrationId!),
+                      builder: (context, mine) {
+                    final registered = mine.data != null;
+                    return Padding(
                       padding: const EdgeInsets.fromLTRB(15, 8, 15, 0),
                       child: SizedBox(
                         width: double.infinity,
@@ -408,12 +482,31 @@ class _EventPageState extends State<EventPage> {
                             foregroundColor: Theme.of(context).colorScheme.onPrimary,
                             padding: const EdgeInsets.symmetric(vertical: 14),
                           ),
-                          icon: const Icon(Icons.how_to_reg),
-                          label: const Text('Register',
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                          onPressed: _register,
+                          icon: _registering
+                              ? SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onPrimary),
+                                )
+                              : Icon(registered
+                                  ? Icons.assignment_turned_in
+                                  : Icons.how_to_reg),
+                          label: Text(
+                              registered ? 'View my registration' : 'Register',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                          // Checking with the server takes a moment (up to
+                          // 8 s offline): one tap at a time. The same
+                          // server-first decision either way: a registered
+                          // fan lands on the status page, open or closed.
+                          onPressed: _registering ? null : _register,
                         ),
                       ),
+                    );
+                      },
                     ),
                   if (_canRemind)
                     Padding(
@@ -545,6 +638,13 @@ class _EventPageState extends State<EventPage> {
                   Column(
                     children: [
                       Text(attendees.isNotEmpty ? "Attendees" : "", style: Theme.of(context).textTheme.headlineMedium,),
+                      if (attendees.isNotEmpty && namesMissing)
+                        Padding(
+                          padding: const EdgeInsets.all(15),
+                          child: Text("Couldn't load attendees",
+                              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                        )
+                      else
                       ListView.builder(
                         shrinkWrap: true,
                           itemCount: attendees.length,

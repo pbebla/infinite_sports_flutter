@@ -1,17 +1,19 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show listEquals;
+import 'package:flutter/foundation.dart' show listEquals, visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_home_banner.dart';
 import 'package:infinite_sports_flutter/globalappbar.dart';
-import 'package:infinite_sports_flutter/leaderboard.dart';
 import 'package:infinite_sports_flutter/league_detail_page.dart';
 import 'package:infinite_sports_flutter/livescore.dart';
 import 'package:infinite_sports_flutter/misc/game_day.dart';
+import 'package:infinite_sports_flutter/misc/season_pointers.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/registration/my_registrations.dart';
 import 'package:infinite_sports_flutter/registration/registration_entry_page.dart';
+import 'package:infinite_sports_flutter/registration/registration_open.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
 import 'package:infinite_sports_flutter/model/tournament.dart';
@@ -19,7 +21,6 @@ import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
-import 'package:infinite_sports_flutter/table.dart';
 import 'package:infinite_sports_flutter/tournament_match_detail.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/fixtures_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/tournament_day_view.dart';
@@ -46,6 +47,160 @@ class _ActiveTournamentTab {
   });
 }
 
+/// One league section of the Matches tab: which season, the day it opens on
+/// and whether the season is over.
+class _LeagueSection {
+  const _LeagueSection({
+    required this.sport,
+    required this.season,
+    required this.date,
+    required this.finished,
+  });
+  final String sport;
+  final String season;
+  final String date;
+  final bool finished;
+}
+
+/// What the top-bar Table/Leaderboard target ([headerNotifier]) becomes when
+/// the Matches tab's sections move from the old pointers to the new ones, or
+/// null to leave it: a header on the old league season follows the league,
+/// one on the old AFC season follows AFC, an unset one takes the league.
+/// Anything else (another selection) is left alone.
+@visibleForTesting
+List<String>? followHeader(
+  List header, {
+  required String oldSport,
+  required String oldSeason,
+  required String oldAfcSeason,
+  required String newSport,
+  required String newSeason,
+  required String newAfcSeason,
+}) {
+  final h0 = header.isNotEmpty ? '${header[0]}' : '';
+  final h1 = header.length > 1 ? '${header[1]}' : '';
+  List<String>? change(List<String> next) =>
+      (next[0] == h0 && next[1] == h1) ? null : next;
+  if (h0.isEmpty && h1.isEmpty) return change([newSport, newSeason]);
+  if (h0 == 'AFC San Jose' && h1 == oldAfcSeason) {
+    return change(['AFC San Jose', newAfcSeason]);
+  }
+  if (h0 == oldSport && h1 == oldSeason) return change([newSport, newSeason]);
+  return null;
+}
+
+/// The home registration banner (way back, owner-approved 2026-11-14): a
+/// registration the fan still owes money on (open OR closed, not removed)
+/// takes priority — "Finish your payment: `name`" with the amount, opening
+/// that registration's status page; otherwise today's "Registration open"
+/// banner; null = no banner. [mine] is null until the fan's own
+/// registrations have answered (and for signed-out fans).
+@visibleForTesting
+({String title, String subtitle, MyRegistration? owing})?
+    homeRegistrationBanner({
+  required MyRegistrations? mine,
+  required Map<String, RegistrationConfig> open,
+  String? Function(String sport)? seasonPointer,
+  Set<String>? activeTournamentIds,
+}) {
+  // Fix round, Important 4: only a CURRENT registration nags (the shared
+  // firstCurrentOwing — the drawer uses the same one).
+  final owing = firstCurrentOwing(mine,
+      seasonPointer: seasonPointer ?? (_) => null,
+      activeTournamentIds: activeTournamentIds);
+  if (owing != null) {
+    return (
+      title: 'Finish your payment: ${owing.config.label}',
+      subtitle: 'You owe ${formatOwed(owing.owed)} — tap to pay',
+      owing: owing,
+    );
+  }
+  // Fix round, Minor 3: once the fan's registrations are known, only the
+  // open registrations they have NOT registered for are offered.
+  final offer = mine?.openForSignUp ?? open;
+  if (offer.isEmpty) return null;
+  return (
+    title: offer.length == 1
+        ? 'Registration open: ${offer.values.first.label}'
+        : 'Registrations are open',
+    subtitle: 'Tap to sign up',
+    owing: null,
+  );
+}
+
+/// How long the home screen's first paint waits for the fan's own
+/// registrations (way back fix round, Important 3).
+const Duration kBannerFirstPaintBound = Duration(seconds: 3);
+
+/// The registration banner's part of the first-paint wait: nothing when
+/// signed out (or nothing to wait for), else the first answer of the fan's
+/// registrations, bounded by [bound]. A failed read or the bound passing
+/// never blocks the paint (a late banner is then accepted).
+@visibleForTesting
+Future<void> bannerDataWait(Future<void>? firstAnswer,
+    {required bool signedIn, Duration bound = kBannerFirstPaintBound}) async {
+  if (!signedIn || firstAnswer == null) return;
+  try {
+    await firstAnswer.timeout(bound, onTimeout: () {});
+  } catch (_) {
+    // A failed read: paint without it.
+  }
+}
+
+/// The banner card (primary fill, white-on-primary text), both modes.
+class HomeRegistrationBanner extends StatelessWidget {
+  const HomeRegistrationBanner(
+      {super.key,
+      required this.banner,
+      required this.onTap,
+      this.busy = false});
+
+  final ({String title, String subtitle, MyRegistration? owing}) banner;
+  final VoidCallback onTap;
+
+  /// The tap is being checked with the server (spinner, no second tap).
+  final bool busy;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(19, 4, 19, 0),
+      child: Card(
+        color: scheme.primary,
+        child: ListTile(
+          leading: Icon(
+              banner.owing != null ? Icons.payments : Icons.how_to_reg,
+              color: scheme.onPrimary),
+          title: Text(
+            banner.title,
+            style: TextStyle(
+                color: scheme.onPrimary, fontWeight: FontWeight.bold),
+          ),
+          subtitle: Text(banner.subtitle,
+              style:
+                  TextStyle(color: scheme.onPrimary.withValues(alpha: 0.7))),
+          // Final small round, N8: one fixed trailing slot — a chevron when
+          // idle, the spinner in its place while checking — so the title
+          // never narrows or rewraps and the banner keeps its height.
+          trailing: SizedBox(
+            width: 24,
+            height: 24,
+            child: busy
+                ? Padding(
+                    padding: const EdgeInsets.all(3),
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: scheme.onPrimary),
+                  )
+                : Icon(Icons.chevron_right, color: scheme.onPrimary),
+          ),
+          onTap: busy ? null : onTap,
+        ),
+      ),
+    );
+  }
+}
+
 class FrontPage extends StatefulWidget {
   const FrontPage({super.key, required this.onTitleSelect});
   final Function(String) onTitleSelect;
@@ -69,6 +224,12 @@ class _FrontPageState extends State<FrontPage> {
   // Parallel to [tabNames]: true when the tab at that index is a tournament tab.
   List<bool> tabIsTournament = List.empty(growable: true);
 
+  // Parallel to [tabNames]: a stable identity per tab ('league', 'afc',
+  // 'tournament:<id>') — the league tab's TITLE changes with the league, so
+  // the fan's selected tab is remembered by key (review fix m2).
+  final List<String> tabKeys = [];
+  String? _selectedTabKey;
+
   // Active tournaments (not finished, each having a current game day).
   List<_ActiveTournamentTab> activeTournaments = [];
 
@@ -81,31 +242,155 @@ class _FrontPageState extends State<FrontPage> {
   // update inside an already-known tournament fires the same stream but
   // must not churn the tabs).
   List<String> _lastActiveTournamentIds = [];
+
+  /// The /Tournaments stream has answered at least once (until then a
+  /// closed tournament registration is never "current" for the banner).
+  bool _tournamentsKnown = false;
   StreamSubscription<List<Tournament>>? _tournamentsWatchSub;
 
   /// Matches-tab header for the current-league section, e.g. "Futsal League"
   /// (P2.1 owner feedback: was the hardcoded "Infinite Sports").
   String get _leagueTabTitle => "$currentSport League";
 
-  // Drives whether the app-bar table/leaderboard shortcut buttons are hidden
-  // (they are league-only and make no sense on a tournament tab).
-  final ValueNotifier<bool> _onTournamentTab = ValueNotifier<bool>(false);
-
   @override
   void initState() {
     super.initState();
+    // Way back: the fan's own registrations, live (signed-in fans only), so
+    // the banner can say "Finish your payment" and drops it once paid.
+    // Started BEFORE the first load: its first answer is part of the
+    // first-paint wait (bounded, fix round Important 3), so the banner is
+    // in the first painted frame instead of popping in above the matches.
+    if (signedIn) {
+      final first = Completer<void>();
+      _myRegistrationsFirst = first;
+      try {
+        _myRegistrationsSub = watchMyRegistrations().listen((m) {
+          if (!first.isCompleted) first.complete();
+          if (mounted) setState(() => _myRegistrations = m);
+        }, onError: (Object _) {
+          if (!first.isCompleted) first.complete();
+        });
+      } catch (_) {
+        if (!first.isCompleted) first.complete();
+      }
+    }
     _loadingPage = getFrontPageValues();
     // Live discovery: a tournament created (or finished/un-finished) after
     // this page loaded shows up as a home tab without restarting the app.
     _tournamentsWatchSub =
         TournamentService.watchAllTournaments().listen(_onTournamentsChanged);
+    // Live season pointers (fresh-reads Task 2): a new league/season set
+    // while the app is open (or a stale saved copy corrected by the server
+    // right after start) moves the league + AFC sections and the top-bar
+    // header in one update, without the first-load skeleton.
+    SeasonPointers.listenable.addListener(_onSeasonPointersChanged);
   }
+
+  Completer<void>? _myRegistrationsFirst;
+  StreamSubscription<MyRegistrations>? _myRegistrationsSub;
+  MyRegistrations? _myRegistrations;
 
   @override
   void dispose() {
-    _onTournamentTab.dispose();
+    SeasonPointers.listenable.removeListener(_onSeasonPointersChanged);
+    _myRegistrationsSub?.cancel();
     _tournamentsWatchSub?.cancel();
     super.dispose();
+  }
+
+  int _pointerFollowGen = 0;
+
+  void _onSeasonPointersChanged() {
+    // The banner's "current registration" rule reads the live pointers.
+    if (mounted) setState(() {});
+    unawaited(_followSeasonPointers());
+  }
+
+  /// Re-reads only the sections whose pointer moved, then applies them in
+  /// ONE setState and moves [headerNotifier] with them. Waits for the first
+  /// load (which may already have read the new values); a newer change
+  /// supersedes an older one still in flight.
+  Future<void> _followSeasonPointers() async {
+    final gen = ++_pointerFollowGen;
+    try {
+      await _loadingPage;
+    } catch (_) {}
+    if (!mounted || gen != _pointerFollowGen) return;
+    final now = SeasonPointers.listenable.value;
+    final leagueMoved = '${now.currentLeague}' != currentSport ||
+        '${now.currentSeason}' != currentSeason;
+    final afcMoved = '${now.afcSeason}' != currentAFCSeason;
+    if (!leagueMoved && !afcMoved) return;
+    final List<_LeagueSection?> sections;
+    try {
+      sections = await Future.wait<_LeagueSection?>([
+        leagueMoved ? _readLeagueSection() : Future.value(null),
+        afcMoved ? _readAfcSection() : Future.value(null),
+      ]);
+    } catch (e) {
+      // A failed read is not a fact: the screen stays as it is; the next
+      // pointer change or the refresh button tries again.
+      debugPrint('FrontPage: following the season pointers failed: $e');
+      return;
+    }
+    if (!mounted || gen != _pointerFollowGen) return;
+    final oldSport = currentSport;
+    final oldSeason = currentSeason;
+    final oldAfc = currentAFCSeason;
+    setState(() {
+      if (sections[0] != null) _applyLeagueSection(sections[0]!);
+      if (sections[1] != null) _applyAfcSection(sections[1]!);
+    });
+    final next = followHeader(headerNotifier.value as List,
+        oldSport: oldSport,
+        oldSeason: oldSeason,
+        oldAfcSeason: oldAfc,
+        newSport: currentSport,
+        newSeason: currentSeason,
+        newAfcSeason: currentAFCSeason);
+    if (next != null) headerNotifier.value = next;
+  }
+
+  /// The current league's section values (pointer → date + finished).
+  Future<_LeagueSection> _readLeagueSection() async {
+    final sport = await getCurrentSport();
+    final season = await getCurrentSeason(sport);
+    final both = await Future.wait<Object>([
+      getCurrentDate(sport, season),
+      isSeasonFinished(sport, season),
+    ]);
+    return _LeagueSection(
+        sport: sport,
+        season: season,
+        date: both[0] as String,
+        finished: both[1] as bool);
+  }
+
+  /// AFC San Jose's section values (pointer → date + finished).
+  Future<_LeagueSection> _readAfcSection() async {
+    final season = await getAFCCurrentSeason();
+    final both = await Future.wait<Object>([
+      getCurrentDate("AFC San Jose", season),
+      isAFCSeasonFinished(season),
+    ]);
+    return _LeagueSection(
+        sport: "AFC San Jose",
+        season: season,
+        date: both[0] as String,
+        finished: both[1] as bool);
+  }
+
+  void _applyLeagueSection(_LeagueSection s) {
+    currentSport = s.sport;
+    currentSeason = s.season;
+    currentDate = s.date;
+    isCurrentFinished = s.finished;
+  }
+
+  void _applyAfcSection(_LeagueSection s) {
+    currentAFCSeason = s.season;
+    currentAFCDate = s.date;
+    isCurrentAFCFinished = s.finished;
   }
 
   /// Reacts to a live /Tournaments update by comparing the sorted active-id
@@ -115,6 +400,11 @@ class _FrontPageState extends State<FrontPage> {
   /// on every emission.
   void _onTournamentsChanged(List<Tournament> tournaments) {
     final ids = TournamentService.activeTournamentIds(tournaments);
+    if (!_tournamentsKnown) {
+      // The banner may now judge closed tournament registrations.
+      _tournamentsKnown = true;
+      if (mounted) setState(() {});
+    }
     if (listEquals(ids, _lastActiveTournamentIds)) return;
     _lastActiveTournamentIds = ids;
     _refreshActiveTournamentTabs();
@@ -135,35 +425,18 @@ class _FrontPageState extends State<FrontPage> {
     // concurrently instead of as one long sequential chain of round trips.
     await Future.wait([
       () async {
-        currentSport = await getCurrentSport();
-        currentSeason = await getCurrentSeason(currentSport);
-        await Future.wait([
-          () async {
-            currentDate = await getCurrentDate(currentSport, currentSeason);
-          }(),
-          () async {
-            isCurrentFinished =
-                await isSeasonFinished(currentSport, currentSeason);
-          }(),
-        ]);
+        _applyLeagueSection(await _readLeagueSection());
       }(),
       () async {
-        currentAFCSeason = await getAFCCurrentSeason();
-        await Future.wait([
-          () async {
-            currentAFCDate =
-                await getCurrentDate("AFC San Jose", currentAFCSeason);
-          }(),
-          () async {
-            isCurrentAFCFinished =
-                await isAFCSeasonFinished(currentAFCSeason);
-          }(),
-        ]);
+        _applyAfcSection(await _readAfcSection());
       }(),
       _loadActiveTournaments(),
       () async {
         openRegistrations = await RegistrationService.getOpenRegistrations();
       }(),
+      // The registration banner's data (bounded at 3 s; none when signed
+      // out; instant when the answer is in the saved copy).
+      bannerDataWait(_myRegistrationsFirst?.future, signedIn: signedIn),
     ]);
     return 1;
   }
@@ -213,37 +486,51 @@ class _FrontPageState extends State<FrontPage> {
 
   /// Banner card shown while any new-style registration is open; tapping it
   /// opens the registration entry page.
+  /// The registration banner, or null (see [homeRegistrationBanner]).
+  ({String title, String subtitle, MyRegistration? owing})? get _banner =>
+      homeRegistrationBanner(
+          mine: _myRegistrations,
+          open: openRegistrations,
+          seasonPointer: (sport) => SeasonPointers.current.seasonFor(sport),
+          activeTournamentIds:
+              _tournamentsKnown ? _lastActiveTournamentIds.toSet() : null);
+
+  /// The owing banner's tap is being checked with the server.
+  bool _bannerChecking = false;
+
   Widget _registrationBanner(BuildContext context) {
-    final config = openRegistrations.values.first;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(19, 4, 19, 0),
-      child: Card(
-        color: Theme.of(context).colorScheme.primary,
-        child: ListTile(
-          leading: Icon(Icons.how_to_reg,
-              color: Theme.of(context).colorScheme.onPrimary),
-          title: Text(
-            openRegistrations.length == 1
-                ? 'Registration open: ${config.label}'
-                : 'Registrations are open',
-            style: TextStyle(
-                color: Theme.of(context).colorScheme.onPrimary,
-                fontWeight: FontWeight.bold),
-          ),
-          subtitle: Text('Tap to sign up',
-              style: TextStyle(
-                  color: Theme.of(context)
-                      .colorScheme
-                      .onPrimary
-                      .withValues(alpha: 0.7))),
-          onTap: () {
-            Navigator.push(context, MaterialPageRoute(builder: (_) {
-              return const RegistrationEntryPage();
-            }));
-          },
-        ),
-      ),
+    final banner = _banner!;
+    return HomeRegistrationBanner(
+      banner: banner,
+      busy: _bannerChecking,
+      onTap: () async {
+        final owing = banner.owing;
+        if (owing == null) {
+          Navigator.push(context, MaterialPageRoute(builder: (_) {
+            return const RegistrationEntryPage();
+          }));
+          return;
+        }
+        await _openOwing(owing.regId);
+      },
     );
+  }
+
+  /// Way back fix round, Important 1: confirm with the server before the
+  /// status page (and its pay actions) opens — the banner's config can be
+  /// the phone's saved copy. One check at a time; "Try again" comes back
+  /// here (final small round, N2) so it gets the same spinner and guard.
+  Future<void> _openOwing(String regId) async {
+    if (_bannerChecking) return;
+    setState(() => _bannerChecking = true);
+    try {
+      await RegistrationOpen.open(context, regId,
+          onRetry: () {
+            if (mounted) _openOwing(regId);
+          });
+    } finally {
+      if (mounted) setState(() => _bannerChecking = false);
+    }
   }
 
   @override
@@ -252,50 +539,6 @@ class _FrontPageState extends State<FrontPage> {
         appBar: GlobalAppBar(
           title: Image.asset('assets/infinite_mark.png', height: 32),
           height: AppBar().preferredSize.height,
-          tableWidget: ValueListenableBuilder<bool>(
-            valueListenable: _onTournamentTab,
-            builder: (context, onTournament, _) {
-              if (onTournament) return const SizedBox.shrink();
-              return ValueListenableBuilder(
-                valueListenable: headerNotifier,
-                builder: (context, value, child) {
-                  return IconButton(
-                    onPressed: () {
-                      Navigator.push(mainContext!, MaterialPageRoute(builder: (_) => Overlay(
-                        initialEntries: [OverlayEntry(
-                            builder: (context) {
-                              return TablePage(sport: value[0], season: value[1]);
-                            })],
-                      )));
-                    },
-                    icon: const ImageIcon(AssetImage('assets/table.png')),
-                  );
-                },
-              );
-            },
-          ),
-          leaderboardWidget: ValueListenableBuilder<bool>(
-            valueListenable: _onTournamentTab,
-            builder: (context, onTournament, _) {
-              if (onTournament) return const SizedBox.shrink();
-              return ValueListenableBuilder(
-                valueListenable: headerNotifier,
-                builder: (context, value, child) {
-                  return IconButton(
-                    onPressed: () {
-                      Navigator.push(mainContext!, MaterialPageRoute(builder: (_) => Overlay(
-                        initialEntries: [OverlayEntry(
-                            builder: (context) {
-                              return LeaderboardPage(sport: value[0], season: value[1]);
-                            })],
-                      )));
-                    },
-                    icon: const ImageIcon(AssetImage('assets/leader.png')),
-                  );
-                },
-              );
-            },
-          ),
         ),
         body: FutureBuilder(
             future: _loadingPage,
@@ -312,17 +555,22 @@ class _FrontPageState extends State<FrontPage> {
               tabs.clear();
               tabNames.clear();
               tabIsTournament.clear();
+              tabKeys.clear();
               if (!isCurrentFinished) {
                 tabNames.add(Tab(text: _leagueTabTitle));
                 tabIsTournament.add(false);
+                tabKeys.add('league');
                 tabs.add(Column(children: [
-                  if (openRegistrations.isNotEmpty)
-                    _registrationBanner(context),
+                  if (_banner != null) _registrationBanner(context),
                   // In-season Infinite Fantasy entry (P6): stream-gates
                   // ITSELF on Fantasy/<sport>/<season>/Config — renders
                   // nothing while the node is absent.
+                  // Keyed: a season pointer change remounts it on the new
+                  // season (it subscribes in initState).
                   FantasyHomeBanner(
-                      sport: currentSport, season: currentSeason),
+                      key: ValueKey('fantasy|$currentSport|$currentSeason'),
+                      sport: currentSport,
+                      season: currentSeason),
                   // P3.1 owner feedback: header opens the season hub
                   // (LeagueDetailPage), mirroring the tournament header card
                   // below. Root navigator, matching league_day_view's pushes.
@@ -373,13 +621,22 @@ class _FrontPageState extends State<FrontPage> {
                   // its own "Friday, June 12" date header, so the old
                   // standalone date line above it is gone).
                   Expanded(
-                      child: LeagueDayView(sport: currentSport, season: currentSeason, date: currentDate)
+                      child: LeagueDayView(
+                          // Keyed: a season pointer change remounts the day
+                          // list on the new season (it streams from
+                          // initState).
+                          key: ValueKey(
+                              'day|$currentSport|$currentSeason|$currentDate'),
+                          sport: currentSport,
+                          season: currentSeason,
+                          date: currentDate)
                   )
                 ]));
               }
               if (!isCurrentAFCFinished) {
                 tabNames.add(Tab(text: "AFC San Jose"));
                 tabIsTournament.add(false);
+                tabKeys.add('afc');
                 tabs.add(Column(children: [
                   LayoutBuilder(
                       builder: (context, constraints) {
@@ -411,48 +668,36 @@ class _FrontPageState extends State<FrontPage> {
                   Divider(color: Theme.of(context).dividerColor, thickness: 1),
                   Text(convertDatabaseDateToFormatDate(currentAFCDate), style: const TextStyle(fontWeight: FontWeight.bold)),
                   Expanded(
-                      child: LiveScorePage(sport: "AFC San Jose", season: currentAFCSeason, date: currentAFCDate, onTitleSelect: (String value) {widget.onTitleSelect(value);})
+                      child: LiveScorePage(
+                          // Keyed: follows a new AFC season pointer.
+                          key: ValueKey('afc|$currentAFCSeason|$currentAFCDate'),
+                          sport: "AFC San Jose", season: currentAFCSeason, date: currentAFCDate, onTitleSelect: (String value) {widget.onTitleSelect(value);})
                   )
                 ]));
               }
               for (final data in activeTournaments) {
                 tabNames.add(Tab(text: data.tournament.name));
                 tabIsTournament.add(true);
+                tabKeys.add('tournament:${data.tournament.id}');
                 tabs.add(_buildTournamentTab(context, data));
               }
               if (tabs.isNotEmpty) {
                 WidgetsBinding.instance.addPostFrameCallback((_) => executeAfterBuild());
-                return DefaultTabController(
-                    length: tabs.length,
-                    child: Scaffold(
-                      appBar: AppBar(
-                        leading: IconButton(
-                            onPressed: () async {
-                              await _refreshData();
-                            },
-                            icon: const Icon(Icons.refresh)
-                        ),
-                        title: TabBar(
-                          isScrollable: true,
-                          tabs: tabNames,
-                          onTap: (value) {
-                            _onTournamentTab.value = tabIsTournament[value];
-                            if (tabNames[value].text == _leagueTabTitle) {
-                              headerNotifier.value = [currentSport, currentSeason];
-                            } else if (tabNames[value].text == "AFC San Jose") {
-                              headerNotifier.value = ["AFC San Jose", currentAFCSeason];
-                            }
-                          },
-                        ),
-                      ),
-                      body: TabBarView(
-                        children: tabs,
-                      ),
-                    )
+                return HomeTabShell(
+                  tabNames: tabNames,
+                  tabs: tabs,
+                  // Review fix m2: the fan stays on the tab they were on
+                  // (by key) when tabs come or go or the league changes.
+                  selectedIndex: _selectedIndex,
+                  onIndexChanged: _selectTab,
+                  onRefresh: () async {
+                    await _refreshData();
+                  },
+                  onTabTap: _selectTab,
                 );
               }
               return Column(children: [
-                if (openRegistrations.isNotEmpty)
+                if (_banner != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: _registrationBanner(context),
@@ -539,20 +784,167 @@ class _FrontPageState extends State<FrontPage> {
     setState(() {});
   }
 
+  /// The selected tab's index in the current tab list (the remembered key,
+  /// else the first tab).
+  int get _selectedIndex {
+    final i = _selectedTabKey == null ? -1 : tabKeys.indexOf(_selectedTabKey!);
+    return i < 0 ? 0 : i;
+  }
+
+  /// A tab was chosen (tap or swipe): remember it by key and point the
+  /// top-bar Table/Leaderboard at it.
+  void _selectTab(int index) {
+    if (index < 0 || index >= tabKeys.length) return;
+    _selectedTabKey = tabKeys[index];
+    _applyHeaderFor(index);
+  }
+
+  /// [headerNotifier] and the tournament flag for the tab at [index], from
+  /// the SAME fields the tab bodies were just built from (review fix m2: the
+  /// header changes in the same update as the games).
+  void _applyHeaderFor(int index) {
+    List<String>? next;
+    if (tabKeys[index] == 'league') {
+      next = [currentSport, currentSeason];
+    } else if (tabKeys[index] == 'afc') {
+      next = ["AFC San Jose", currentAFCSeason];
+    }
+    // A tournament tab leaves headerNotifier unchanged.
+    if (next != null && !listEquals(headerNotifier.value as List, next)) {
+      headerNotifier.value = next;
+    }
+  }
+
   void executeAfterBuild() {
     if (!mounted) return;
-    if (tabNames.isEmpty) return;
-    _onTournamentTab.value =
-        tabIsTournament.isNotEmpty ? tabIsTournament[0] : false;
-    if (tabNames[0].text == _leagueTabTitle) {
-      headerNotifier.value = [currentSport, currentSeason];
-    } else if (tabNames[0].text == "AFC San Jose") {
-      headerNotifier.value = ["AFC San Jose", currentAFCSeason];
-    }
-    // If the first tab is a tournament, headerNotifier is intentionally left
-    // unchanged: the table/leaderboard buttons it feeds are hidden on
-    // tournament tabs (via _onTournamentTab), so its value is never read there.
+    if (tabKeys.isEmpty) return;
+    // Every build: keep the fan's tab (not tab 0) and its header.
+    final index = _selectedIndex;
+    _selectedTabKey = tabKeys[index];
+    _applyHeaderFor(index);
   }
+}
+
+/// The home screen's tab shell: the refresh button + scrollable TabBar in
+/// the app bar, and the tab bodies. Its tab count changes LIVE (the
+/// /Tournaments listener adds a tab when a tournament starts and drops it
+/// when one finishes), so it deliberately uses a plain
+/// [DefaultTabController] and does NOT key anything by the count: the
+/// surviving tab bodies keep their state (streams, scroll, selected day)
+/// across the change. Nothing below it is count-keyed, so the controller
+/// swap cannot strand a TabBar (fix round 1, I1 — contrast
+/// LiveLengthTabController, which is for pages whose subtree is remounted).
+class HomeTabShell extends StatelessWidget {
+  const HomeTabShell({
+    super.key,
+    required this.tabNames,
+    required this.tabs,
+    required this.onTabTap,
+    required this.onRefresh,
+    this.selectedIndex,
+    this.onIndexChanged,
+  });
+
+  final List<Tab> tabNames;
+  final List<Widget> tabs;
+  final ValueChanged<int> onTabTap;
+  final VoidCallback onRefresh;
+
+  /// The tab to show (review fix m2): when tabs come or go, the controller
+  /// keeps an index NUMBER, so the fan's tab is moved back to here.
+  final int? selectedIndex;
+
+  /// Every settled index change (taps AND swipes).
+  final ValueChanged<int>? onIndexChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return DefaultTabController(
+      length: tabs.length,
+      child: _SelectedTabKeeper(
+        selectedIndex: selectedIndex,
+        onIndexChanged: onIndexChanged,
+        child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            onPressed: onRefresh,
+            icon: const Icon(Icons.refresh),
+          ),
+          title: TabBar(
+            isScrollable: true,
+            tabs: tabNames,
+            onTap: onTabTap,
+          ),
+        ),
+        body: TabBarView(children: tabs),
+        ),
+      ),
+    );
+  }
+}
+
+/// Follows the DefaultTabController above it (it is replaced when the tab
+/// count changes): reports settled index changes and moves the controller to
+/// [selectedIndex] when it differs (a jump, no animation).
+class _SelectedTabKeeper extends StatefulWidget {
+  const _SelectedTabKeeper({
+    required this.selectedIndex,
+    required this.onIndexChanged,
+    required this.child,
+  });
+
+  final int? selectedIndex;
+  final ValueChanged<int>? onIndexChanged;
+  final Widget child;
+
+  @override
+  State<_SelectedTabKeeper> createState() => _SelectedTabKeeperState();
+}
+
+class _SelectedTabKeeperState extends State<_SelectedTabKeeper> {
+  TabController? _controller;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final c = DefaultTabController.maybeOf(context);
+    if (!identical(c, _controller)) {
+      _controller?.removeListener(_onChanged);
+      _controller = c;
+      c?.addListener(_onChanged);
+    }
+    _keepSelected();
+  }
+
+  @override
+  void didUpdateWidget(covariant _SelectedTabKeeper oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _keepSelected();
+  }
+
+  void _onChanged() {
+    final c = _controller;
+    if (c == null || c.indexIsChanging) return;
+    widget.onIndexChanged?.call(c.index);
+  }
+
+  void _keepSelected() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final c = _controller;
+      final want = widget.selectedIndex;
+      if (!mounted || c == null || want == null) return;
+      if (want >= 0 && want < c.length && c.index != want) c.index = want;
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller?.removeListener(_onChanged);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 /// Live body of a home-screen tournament tab: streams the tournament's matches

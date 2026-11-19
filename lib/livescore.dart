@@ -9,6 +9,8 @@ import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/model/soccergame.dart';
 import 'package:infinite_sports_flutter/scorepage.dart';
 import 'package:infinite_sports_flutter/misc/schedule_display.dart';
+import 'package:infinite_sports_flutter/misc/fresh_follow.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/widgets/forfeit_chip.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
@@ -47,10 +49,42 @@ class _LiveScorePageState extends State<LiveScorePage> {
   late Future<List<Game>> _fetchGamesList;
   final _controller = ScrollController(keepScrollOffset: true);
 
+  /// Games re-read after a newer server value landed while open (fresh
+  /// reads, Task 4) — shown instead of the first future's data.
+  List<Game>? _newer;
+  VoidCallback? _stopNewerFollow;
+  /// One in-place refresh at a time; a newer value during one queues
+  /// exactly one more (second review, Minor 4).
+  late final CoalescedRefresh _refresh = CoalescedRefresh(_refreshInPlace);
+
   @override
   void initState() {
     _fetchGamesList = getGames(widget.sport, widget.season, widget.date, times);
     super.initState();
+    // Fresh reads (Task 4, survey list C — the Matches tab's AFC San Jose
+    // section and the AFC league pages): while open, a newer server value of
+    // this season's games (Date) or roster repaints the cards IN PLACE —
+    // one setState, scroll kept, no skeleton.
+    final node = widget.sport == "AFC San Jose"
+        ? "AFC San Jose/Seasons/${widget.season}"
+        : "${widget.sport}/${widget.season}";
+    _stopNewerFollow = FreshReads.onNewerUnder('', (path, _) {
+      if (path == '$node/Date' || path == '$node/Roster') _refresh.request();
+    });
+  }
+
+  Future<void> _refreshInPlace() async {
+    final list =
+        await getGames(widget.sport, widget.season, widget.date, times);
+    if (mounted) setState(() => _newer = list);
+  }
+
+  @override
+  void dispose() {
+    _stopNewerFollow?.call();
+    _refresh.dispose();
+    _controller.dispose();
+    super.dispose();
   }
 
   List<GestureDetector> populateCardList(List<Game> gamesList, localSetState) {
@@ -268,8 +302,9 @@ class _LiveScorePageState extends State<LiveScorePage> {
 
   Future<void> _refreshData(localsetState) async { 
     // Add new items or update the data here 
-    _fetchGamesList = getGames(widget.sport, widget.season, widget.date, times);
-    gamesList = await _fetchGamesList;
+    final list = await getGames(widget.sport, widget.season, widget.date, times);
+    gamesList = list;
+    _newer = list;
     if (mounted) {
       localsetState(() {}); 
     }
@@ -300,7 +335,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
         if (!snapshot.hasData) {
           return const Center(child: Card(child: Text("No Upcoming Games, Stay Tuned for Next Season!", style: TextStyle(fontWeight: FontWeight.bold),),),);
         }
-        gamesList = snapshot.data!;
+        gamesList = _newer ?? snapshot.data!;
         return StatefulBuilder(
           builder: (context, setState) {
             return RefreshIndicator(

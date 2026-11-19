@@ -47,8 +47,11 @@ import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/selling.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/auto_sub_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/chip_row.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/deadline_chip.dart'
+    show kDeadlineUnavailable;
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart'
     show movementDirection;
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_rows.dart'
@@ -71,6 +74,8 @@ class FantasySquadBuilder extends StatefulWidget {
     required this.config,
     required this.lockOverride,
     required this.gameweeks,
+    this.scheduleUnknown = false,
+    this.onRetrySchedule,
     required this.players,
     required this.squadStates,
     this.initialSquad,
@@ -134,6 +139,14 @@ class FantasySquadBuilder extends StatefulWidget {
   final FantasyLockOverride lockOverride;
   final List<Gameweek> gameweeks;
 
+  /// The schedule read failed (FantasyScheduleFeed.scheduleUnknown, review 6
+  /// I2): never "Locked" / "Season complete" from that empty list.
+  final bool scheduleUnknown;
+
+  /// Non-null once the schedule feed has GIVEN UP retrying (re-review 6b,
+  /// item 2): the strip says so and offers "Try again" (this callback).
+  final VoidCallback? onRetrySchedule;
+
   /// The live market (guests arrive eligible=false and are filtered by the
   /// picker).
   final List<FantasyPlayer> players;
@@ -179,10 +192,16 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
 
   /// The schedule's verdict alone (the owner's lock override, the deadline):
   /// whether the WEEK is open for editing — what decides the locked view.
-  bool get _scheduleEditable => squadEditable(
+  bool get _scheduleEditable => _editState == SquadEditState.open;
+
+  /// open / locked / unknown — unknown = the schedule read failed (review 6,
+  /// I2): the court is not editable, and the strip says the deadline can't
+  /// be checked instead of "Locked".
+  SquadEditState get _editState => squadEditState(
         lockOverride: widget.lockOverride,
         gameweeks: widget.gameweeks,
         nowUtc: _now,
+        scheduleUnknown: widget.scheduleUnknown,
       );
 
   /// Whether THIS manager can edit right now (the schedule, and a pass).
@@ -308,10 +327,18 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
     if (player == null || !mounted) return;
     final message = _draft.setPickAt(
         i, _draft.newPick(player, bench: _draft.slots[i].bench));
-    _announceArmbandLoss(message);
+    _announceArmband(message);
   }
 
   Future<void> _chipActions(int i, SquadPick pick) async {
+    // Substitute (ticket #5): one counterpart = a direct swap named on the
+    // tile; several = the substitute sheet; none = no tile.
+    final counterparts = _draft.substituteCandidates(i);
+    // Who each counterpart slot holds as the tile is labelled: the tap must
+    // still mean that player (final review M2).
+    final counterpartIds = {
+      for (final c in counterparts) c: _draft.picks[c]!.playerId,
+    };
     final action = await showSquadChipActions(
       context,
       playerName: pick.playerId,
@@ -319,6 +346,11 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
       isCaptain: pick.playerId == _draft.captainId,
       isVice: pick.playerId == _draft.viceId,
       showProfile: widget.onOpenPlayer != null,
+      substituteLabel: switch (counterparts.length) {
+        0 => null,
+        1 => 'Substitute with ${_draft.picks[counterparts.single]!.playerId}',
+        _ => 'Substitute',
+      },
     );
     if (action == null || !mounted) return;
     switch (action) {
@@ -328,11 +360,51 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
         _draft.makeCaptain(pick.playerId);
       case SquadChipAction.makeVice:
         _draft.makeVice(pick.playerId);
+      case SquadChipAction.substitute:
+        await _substitute(i, pick, counterpartIds);
       case SquadChipAction.swap:
         await _pickInto(i, outgoing: pick);
       case SquadChipAction.remove:
-        _announceArmbandLoss(_draft.removeAt(i));
+        _announceArmband(_draft.removeAt(i));
     }
+  }
+
+  /// Substitute: trade places with the one [counterparts] slot at once, or
+  /// with the one picked on the substitute sheet. [counterparts] maps each
+  /// counterpart slot to the player it held when the choice was shown. Free
+  /// and not a transfer — a draft edit saved by Save squad, so every
+  /// substitution ends with the save reminder (final review I2), after the
+  /// passed-armband sentence when there is one.
+  Future<void> _substitute(
+      int i, SquadPick pick, Map<int, String> counterparts) async {
+    int? other;
+    if (counterparts.length == 1) {
+      other = counterparts.keys.single;
+    } else {
+      other = await showSubstituteSheet(
+        context,
+        playerName: pick.playerId,
+        candidates: [
+          for (final MapEntry(key: c, value: id) in counterparts.entries)
+            (slot: c, name: id, position: _draft.slots[c].position),
+        ],
+      );
+    }
+    if (other == null || !mounted) return;
+    // The deadline may have passed while a sheet was open, or the draft
+    // changed under it (a stream adopt): re-check before editing — the
+    // same player here, and the chosen slot still holding the player the
+    // tile or row named.
+    if (!_editable ||
+        _draft.picks[i]?.playerId != pick.playerId ||
+        _draft.picks[other]?.playerId != counterparts[other] ||
+        !_draft.substituteCandidates(i).contains(other)) {
+      return;
+    }
+    final armband = _draft.substitute(i, other);
+    _announceArmband(armband == null
+        ? 'Swapped. Tap Save squad to keep it.'
+        : '$armband Tap Save squad to keep it.');
   }
 
   /// "Swap" on the Needs-a-new-spot strip: pick a replacement for the hole
@@ -343,7 +415,7 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
     if (slot == null) {
       // Unreachable for a position change (the move always leaves a hole);
       // removing is the honest fallback.
-      _announceArmbandLoss(_draft.removeUnplaced(pick.playerId));
+      _announceArmband(_draft.removeUnplaced(pick.playerId));
       return;
     }
     final player = await showSquadPickerSheet(
@@ -357,7 +429,7 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
       moneyReady: _draft.moneyReady,
     );
     if (player == null || !mounted) return;
-    _announceArmbandLoss(_draft.swapUnplaced(pick.playerId, slot,
+    _announceArmband(_draft.swapUnplaced(pick.playerId, slot,
         _draft.newPick(player, bench: _draft.slots[slot].bench)));
   }
 
@@ -384,13 +456,17 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
         for (final c in alert.changes) (player: c.player, to: c.to),
       ],
       deadline: target == null ? 'the deadline' : formatAbsoluteLock(target),
-      freeThisWeek: current == null || current.number == alert.gameweek,
+      // A failed schedule read promises nothing that depends on the
+      // schedule (re-review 6b, item 3): no free swap, and "the deadline".
+      freeThisWeek: !widget.scheduleUnknown &&
+          (current == null || current.number == alert.gameweek),
     );
   }
 
-  /// A removed/swapped-out captain or vice is SAID out loud — nothing
-  /// happens silently (spec §2 kindness rule).
-  void _announceArmbandLoss(String? message) {
+  /// An armband side effect is SAID out loud — a removed/replaced captain or
+  /// vice, or one passed on by a Substitute; nothing happens silently (spec
+  /// §2 kindness rule). Also carries the Substitute's save reminder.
+  void _announceArmband(String? message) {
     if (message == null || !mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -464,6 +540,13 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
     // rewrites after finalize and which keeps a chip the lock voided. Until
     // it has loaded the court is the draft's and shows no points lines.
     final lockedSquad = locked?.squad;
+    // The week's auto-subs (display only): the sub drawn on the pitch in
+    // the absent starter's slot, the starter on the bench reading Out. Only
+    // the locked squad has rows; the editable court never moves anything.
+    final autoSubs = lockedSquad == null
+        ? null
+        : autoSubDisplay(_draft.slots,
+            picksToSlots(lockedSquad, _draft.slots), locked!.rows);
     // The chip on screen: the locked squad's (null = none — a voided chip
     // included) once it has loaded, else the draft's.
     final shownChip = lockedSquad != null ? lockedSquad.chip : _draft.chip;
@@ -545,7 +628,9 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
                 const SizedBox(height: 8),
                 _TransfersLine(preview: transfers),
               ],
-            ] else
+            ] else if (_editState == SquadEditState.unknown)
+              _DeadlineUnknownStrip(onRetry: widget.onRetrySchedule)
+            else
               // Nothing known about the week (no model yet): just "Locked" —
               // never a claim about kickoff.
               _LockedWeekStrip(
@@ -555,9 +640,7 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
           FantasyCourtView(
             config: widget.config,
             slots: _draft.slots,
-            slotPicks: lockedSquad == null
-                ? _draft.picks
-                : picksToSlots(lockedSquad, _draft.slots),
+            slotPicks: autoSubs?.slotPicks ?? _draft.picks,
             captainId: lockedSquad?.captainId ?? _draft.captainId,
             viceId: lockedSquad?.viceId ?? _draft.viceId,
             // The REAL armband multiplier: ×3 while Triple Captain is the
@@ -567,7 +650,11 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
             // Locked: each chip carries that player's counted points (live or
             // settled) — nothing while editing is open, and only for a squad
             // the lines belong to (the resolver's chipTexts).
-            weekPointsFor: locked?.chipTextFor,
+            // A starter an auto-sub replaced reads Out (auto_sub_view).
+            weekPointsFor: subbedOutChipText(
+                locked?.chipTextFor, autoSubs?.subbedOut ?? const {}),
+            subbedIn: autoSubs?.subbedIn ?? const {},
+            subbedOut: autoSubs?.subbedOut ?? const {},
             onSlotTap: editable ? _onSlotTap : null,
             // Locked: viewing a profile is still allowed (filled chips only;
             // empty slots stay inert).
@@ -588,7 +675,7 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
               enabled: editable,
               onSwap: _swapUnplaced,
               onRemove: (pick) =>
-                  _announceArmbandLoss(_draft.removeUnplaced(pick.playerId)),
+                  _announceArmband(_draft.removeUnplaced(pick.playerId)),
             ),
           ],
           const SizedBox(height: 14),
@@ -829,6 +916,60 @@ class _TransfersLine extends StatelessWidget {
 /// the hub; the movement reads in the leaderboard's own up / down colours
 /// (pitch green / the bright fantasy red), both themes. Text wraps, never
 /// ellipsizes, so it fits 360 px.
+/// My Team while the schedule could not be read (review 6, I2): editing is
+/// paused because the deadline can't be checked — never "Locked". The
+/// schedule feed retries on its own.
+class _DeadlineUnknownStrip extends StatelessWidget {
+  const _DeadlineUnknownStrip({this.onRetry});
+
+  /// Non-null once retrying has stopped: plain wording + "Try again".
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      key: const ValueKey('deadline_unknown_strip'),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.schedule, size: 18, color: scheme.onSurfaceVariant),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              onRetry == null
+                  ? "$kDeadlineUnavailable — can't check whether editing is "
+                      'open right now. Trying again…'
+                  : "$kDeadlineUnavailable — couldn't check whether editing "
+                      'is open.',
+              softWrap: true,
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.25,
+                fontWeight: FontWeight.w600,
+                color: scheme.onSurface,
+              ),
+            ),
+          ),
+          if (onRetry != null) ...[
+            const SizedBox(width: 8),
+            TextButton(
+              key: const ValueKey('deadline_unknown_retry'),
+              onPressed: onRetry,
+              child: const Text('Try again'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _LockedWeekStrip extends StatelessWidget {
   const _LockedWeekStrip({required this.view});
 
@@ -968,11 +1109,7 @@ class _NeedsNewSpotStrip extends StatelessWidget {
   final void Function(SquadPick pick) onSwap;
   final void Function(SquadPick pick) onRemove;
 
-  static String _nowA(FantasyPosition p) => switch (p) {
-        FantasyPosition.gk => 'Now a goalkeeper',
-        FantasyPosition.def => 'Now a defender',
-        FantasyPosition.att => 'Now an attacker',
-      };
+  static String _nowA(FantasyPosition p) => 'Now ${p.withArticle}';
 
   @override
   Widget build(BuildContext context) {

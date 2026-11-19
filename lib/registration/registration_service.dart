@@ -1,9 +1,52 @@
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 import 'package:infinite_sports_flutter/misc/stream_resilience.dart';
 import 'package:infinite_sports_flutter/registration/promo_engine.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
+
+/// What a submit attempt came to. [alreadyRegistered] and [couldNotCheck]
+/// are refusals made BEFORE anything is written (fresh-reads Task 3, #74):
+/// a submit never overwrites an existing (maybe paid, maybe discounted)
+/// submission, and never writes on an answer the server did not confirm.
+enum SubmitOutcome { ok, alreadyRegistered, couldNotCheck, failed }
+
+/// Where a Register tap leads (fresh-reads Task 3, #72/#74; way back).
+enum RegistrationRoute { status, register, closed, unavailable, couldNotCheck }
+
+/// The routing decision, pure. [configChecked]/[submissionChecked] say the
+/// answers came from the server (a saved copy or a failed read is not a
+/// fact).
+///
+/// Owner's rule (way back, 2026-11-14): a fan who already registered is
+/// taken to their status / payment page whatever the registration's status
+/// — open OR closed. So:
+///   • a registration that no longer exists (config gone) → [unavailable];
+///   • an existing submission (from any source) → [status];
+///   • "not registered" only counts when the server said so → otherwise
+///     [couldNotCheck] (never "closed" as a guess);
+///   • no submission on a closed registration → [closed];
+///   • no submission on an open one → [register].
+RegistrationRoute registrationRoute({
+  required bool configChecked,
+  required RegistrationConfig? config,
+  required bool submissionExists,
+  required bool submissionChecked,
+}) {
+  if (!configChecked) return RegistrationRoute.couldNotCheck;
+  if (config == null) return RegistrationRoute.unavailable;
+  if (submissionExists) return RegistrationRoute.status;
+  if (!submissionChecked) return RegistrationRoute.couldNotCheck;
+  if (!config.isOpen) return RegistrationRoute.closed;
+  return RegistrationRoute.register;
+}
+
+/// The "couldn't check" sentence of the registration screens (same shape as
+/// the join-code page's "Couldn't check the code…").
+const String kRegistrationCouldNotCheck =
+    "Couldn't check your registration. Check your connection and try again.";
 
 /// Fan-side reads/writes for the new registration engine (L1a individual
 /// path + L1b team paths). Static-method style matching TournamentService
@@ -12,6 +55,31 @@ import 'package:infinite_sports_flutter/registration/registration_models.dart';
 /// Paid/'team code' (spec section 5); everything else is the Manager's
 /// markPaid.
 class RegistrationService {
+  /// Test seam replacing the real callable round trip for
+  /// [checkFirstTimer] / [resolveJoinCode]: receives the callable name and
+  /// payload and returns the callable's `data` (or throws, like a failed
+  /// call). null in production.
+  @visibleForTesting
+  static Future<Object?> Function(String name, Map<String, dynamic> data)?
+      callableOverride;
+
+  /// Test seam replacing the signed-in uid (null = FirebaseAuth).
+  @visibleForTesting
+  static String? Function()? uidOverride;
+
+  static String? get _uid =>
+      uidOverride != null ? uidOverride!() : FirebaseAuth.instance.currentUser?.uid;
+
+  static Future<Object?> _callable(
+      String name, Map<String, dynamic> data) async {
+    final override = callableOverride;
+    if (override != null) return override(name, data);
+    final result = await FirebaseFunctions.instance
+        .httpsCallable(name)
+        .call<Map<String, dynamic>>(data);
+    return result.data;
+  }
+
   /// {regId: config} for every registration whose Status is "open".
   ///
   /// DB lockdown B2: reads the RegistrationsPublic mirror (each child is
@@ -22,13 +90,80 @@ class RegistrationService {
   static Future<Map<String, RegistrationConfig>> getOpenRegistrations() async {
     try {
       final snap =
-          (await FirebaseDatabase.instance.ref('RegistrationsPublic').once())
+          (await refreshingOnce(FirebaseDatabase.instance.ref('RegistrationsPublic')))
               .snapshot;
       return openRegistrationsFromNode(snap.value);
     } catch (_) {
       return {};
     }
   }
+
+  /// One registration's config checked against the server (fresh-reads
+  /// Task 3, #72) — the entry passes this config (and its fee) into the
+  /// whole flow, so a saved copy is not enough. `config` is the config
+  /// whatever its Status (way back: a registered fan reaches a CLOSED
+  /// registration's status page); null only when the registration is
+  /// missing or malformed (removed). `checked` is false when the server
+  /// could not confirm the answer (offline, timeout, error).
+  static Future<({RegistrationConfig? config, bool checked})>
+      checkRegistration(String regId) async {
+    try {
+      final r = await serverFirstValue('RegistrationsPublic/$regId');
+      return (
+        config: RegistrationConfig.fromFirebase(r.value),
+        checked: r.fromServer,
+      );
+    } catch (_) {
+      return (config: null, checked: false);
+    }
+  }
+
+  /// THE entry decision every way into a registration uses (the event
+  /// page's Register, the registration list reached from the home banner or
+  /// the drawer — review fix Important 1). The config is re-read
+  /// SERVER-FIRST together with "already registered?" (one barrier, one
+  /// bound), and only that server config is handed to the path, form,
+  /// status and payment pages — the fee shown and the Venmo/Zelle amount
+  /// come from the same config the card charge does
+  /// (createRegistrationPaymentIntent reads the server Config).
+  /// `config` is null unless the route is status/register.
+  static Future<({RegistrationRoute route, RegistrationConfig? config})>
+      checkEntry(String regId) async {
+    final checks = await Future.wait<Object>([
+      checkRegistration(regId),
+      checkMySubmission(regId),
+    ]);
+    final open = checks[0] as ({RegistrationConfig? config, bool checked});
+    final mine =
+        checks[1] as ({RegSubmission? submission, bool exists, bool checked});
+    final route = registrationRoute(
+        configChecked: open.checked,
+        config: open.config,
+        submissionExists: mine.exists,
+        submissionChecked: mine.checked);
+    final goes =
+        route == RegistrationRoute.status || route == RegistrationRoute.register;
+    return (route: route, config: goes ? open.config : null);
+  }
+
+  /// Live config of ONE registration from `Registrations/<regId>/Config` —
+  /// the node the card charge is computed from (second review, Important
+  /// 2; readable by everyone under both rules files). null = missing or
+  /// malformed. Errors are forwarded (a failed read is not a fact).
+  static Stream<RegistrationConfig?> watchConfig(String regId) =>
+      FirebaseDatabase.instance
+          .ref('Registrations/$regId/Config')
+          .onValue
+          .map((event) => RegistrationConfig.fromFirebase(event.snapshot.value));
+
+  /// Live {regId: config} of EVERY registration in the public mirror,
+  /// whatever its Status (way back: closed registrations stay listed there —
+  /// see my_registrations.dart). Errors are forwarded.
+  static Stream<Map<String, RegistrationConfig>> watchAllRegistrations() =>
+      FirebaseDatabase.instance
+          .ref('RegistrationsPublic')
+          .onValue
+          .map((event) => allRegistrationsFromNode(event.snapshot.value));
 
   /// Live {regId: config} stream of every open registration. Emits
   /// immediately from RTDB's local cache (if any) then on every change, so
@@ -53,9 +188,8 @@ class RegistrationService {
   static Future<List<RegQuestion>> getForm(String regId) async {
     try {
       // once(), not get(): firebase-ios-sdk returns wrong/empty data for one-shot
-      final snap = (await FirebaseDatabase.instance
-              .ref('Registrations/$regId/Form')
-              .once())
+      final snap = (await refreshingOnce(FirebaseDatabase.instance
+              .ref('Registrations/$regId/Form')))
           .snapshot;
       return regQuestionsFromNode(snap.value);
     } catch (_) {
@@ -63,18 +197,93 @@ class RegistrationService {
     }
   }
 
-  /// The signed-in user's submission, or null (not signed in / none / error).
-  static Future<RegSubmission?> getMySubmission(String regId) async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return null;
+  /// The signed-in user's submission checked against the server
+  /// (fresh-reads Task 3, #74): `exists` is true when ANY node is there
+  /// (even a malformed one — never route a registered fan back into the
+  /// form); `checked` is true when the answer is a fact (it exists, or the
+  /// server said it does not). A saved copy saying "none", or a failed read,
+  /// is `checked: false`. Signed out: nothing to find (checked).
+  static Future<({RegSubmission? submission, bool exists, bool checked})>
+      checkMySubmission(String regId) async {
+    final uid = _uid;
+    if (uid == null) return (submission: null, exists: false, checked: true);
     try {
-      final snap = (await FirebaseDatabase.instance
-              .ref('Registrations/$regId/Submissions/$uid')
-              .once())
-          .snapshot;
-      return RegSubmission.fromFirebase(snap.value);
+      final r = await serverFirstValue('Registrations/$regId/Submissions/$uid');
+      final exists = r.value != null;
+      return (
+        submission: RegSubmission.fromFirebase(r.value),
+        exists: exists,
+        checked: exists || r.fromServer,
+      );
     } catch (_) {
-      return null;
+      return (submission: null, exists: false, checked: false);
+    }
+  }
+
+  /// Test seam replacing the legacy sign-up repair write (path, value).
+  @visibleForTesting
+  static Future<void> Function(String path, Object value)? legacyWriteOverride;
+
+  /// Review fix (Minor 1): a submit whose submission write landed but whose
+  /// legacy `Sign Ups/<league>/<season>/<bucket>/<uid>` dual-write did not
+  /// (the "try again" now meets the existing submission) is completed here,
+  /// on the retry and when the status page opens. Idempotent and safe: the
+  /// three reads are server-first and run together; nothing is written
+  /// unless all three came from the server ([legacyRepairBucket]); an entry
+  /// in EITHER bucket means nothing to do (a Paid entry is never touched);
+  /// only the signed-in fan's own uid is written. Never throws.
+  static Future<void> repairLegacySignUp(
+      String regId, RegistrationConfig config,
+      {String? displayName}) async {
+    try {
+      final uid = _uid;
+      if (uid == null) return;
+      final target = legacySignUpTarget(config);
+      final base = 'Sign Ups/${target.league}/${target.season}';
+      final reads = await Future.wait([
+        serverFirstValue('Registrations/$regId/Submissions/$uid'),
+        serverFirstValue('$base/NotPaid/$uid'),
+        serverFirstValue('$base/Paid/$uid'),
+      ]);
+      if (!reads.every((r) => r.fromServer)) return;
+      final bucket = legacyRepairBucket(
+          submission: RegSubmission.fromFirebase(reads[0].value),
+          notPaidExists: reads[1].value != null,
+          paidExists: reads[2].value != null);
+      if (bucket == null) return;
+      final name = displayName ??
+          collapseTrailingSpaces(
+              FirebaseAuth.instance.currentUser?.displayName ?? '');
+      final path = '$base/$bucket/$uid';
+      final write = legacyWriteOverride;
+      if (write != null) {
+        await write(path, name);
+      } else {
+        await FirebaseDatabase.instance.ref(path).set(name);
+      }
+    } catch (e) {
+      debugPrint('RegistrationService: legacy sign-up repair failed: $e');
+    }
+  }
+
+  /// The pre-write guard every submit runs (fresh-reads Task 3, #74). The
+  /// rules let the owner overwrite their own submission while the
+  /// registration is open (database.rules.stage1.json
+  /// Registrations/$regId/Submissions/$uid: `.write` has no
+  /// `!data.exists()`). The rules' `.validate` stops a non-admin from changing
+  /// Paid, PaidVia or PaidAmount on an existing submission, but a replace can
+  /// still reset the answers, path, team and the rest of the record, so the
+  /// app refuses: an existing submission → [alreadyRegistered];
+  /// "none" not confirmed by the server → [couldNotCheck].
+  static Future<SubmitOutcome> guardNewSubmission(
+      String regId, String uid) async {
+    try {
+      final r = await serverFirstValue('Registrations/$regId/Submissions/$uid');
+      if (r.value != null) return SubmitOutcome.alreadyRegistered;
+      if (!r.fromServer) return SubmitOutcome.couldNotCheck;
+      return SubmitOutcome.ok;
+    } catch (_) {
+      return SubmitOutcome.couldNotCheck;
     }
   }
 
@@ -104,7 +313,7 @@ class RegistrationService {
     if (uid == null) return {};
     try {
       final snap =
-          (await FirebaseDatabase.instance.ref('Users/$uid').once()).snapshot;
+          (await refreshingOnce(FirebaseDatabase.instance.ref('Users/$uid'))).snapshot;
       if (snap.value is! Map) return {};
       final user = snap.value as Map;
       final out = <String, dynamic>{};
@@ -140,15 +349,18 @@ class RegistrationService {
   /// editor) has not shipped yet — [RegPromo.fromFirebase] is defensive, so
   /// a missing node (every registration today) parses to an all-defaults,
   /// DISABLED promo rather than throwing/returning null.
-  static Future<RegPromo> getPromo(String regId) async {
+  ///
+  /// Server-first (fresh-reads Task 3, #76): the promo percent is stamped
+  /// onto the submission, so `checked` says whether the server confirmed it.
+  /// A saved copy or a failed read comes back `checked: false` (with the
+  /// saved copy, or the disabled default) and the form applies NO promo
+  /// discount on it.
+  static Future<({RegPromo promo, bool checked})> getPromo(String regId) async {
     try {
-      final snap = (await FirebaseDatabase.instance
-              .ref('Registrations/$regId/Promo')
-              .once())
-          .snapshot;
-      return RegPromo.fromFirebase(snap.value);
+      final r = await serverFirstValue('Registrations/$regId/Promo');
+      return (promo: RegPromo.fromFirebase(r.value), checked: r.fromServer);
     } catch (_) {
-      return const RegPromo();
+      return (promo: const RegPromo(), checked: false);
     }
   }
 
@@ -161,22 +373,23 @@ class RegistrationService {
   /// same normalization as promo_engine.dart's [firstTimer]) and returns
   /// the same FirstTimerResult shape.
   ///
-  /// Defensive: any error degrades to "first-timer" — exactly what the old
-  /// scan's silent-failure path produced (an empty prior-submissions list).
-  /// Same callable pattern as createRegistrationPaymentIntent
+  /// An error is not a verdict: a failed call (offline, timeout, cold
+  /// start) comes back as NOT a first-timer with
+  /// [FirstTimerResult.checkFailed] set, so no first-timer promo discount is
+  /// handed out on a guess — the promo field tells the person the standard
+  /// fee applies and to contact us (an admin can still grant the promo in
+  /// the Manager). Same callable pattern as createRegistrationPaymentIntent
   /// (payment_screen.dart).
   static Future<FirstTimerResult> checkFirstTimer({
     required String email,
     required String phone,
   }) async {
     try {
-      final callable =
-          FirebaseFunctions.instance.httpsCallable('checkFirstTimer');
-      final result = await callable
-          .call<Map<String, dynamic>>({'email': email, 'phone': phone});
-      return firstTimerResultFromCallable(result.data);
+      final data =
+          await _callable('checkFirstTimer', {'email': email, 'phone': phone});
+      return firstTimerResultFromCallable(data);
     } catch (_) {
-      return const FirstTimerResult(isFirstTimer: true);
+      return const FirstTimerResult(isFirstTimer: false, checkFailed: true);
     }
   }
 
@@ -185,20 +398,19 @@ class RegistrationService {
   /// registration's teams — join codes included, payment-waiving ones among
   /// them — and matched locally; the callable never returns other teams'
   /// codes. The result maps onto the same [JoinCodeMatch] statuses the page
-  /// has always branched on ('ok' | 'notApproved' | 'notFound'); errors
-  /// degrade to 'notFound'.
+  /// has always branched on ('ok' | 'notApproved' | 'notFound'). A FAILED
+  /// call (offline, timeout, cold start) is 'error' — never 'notFound', which
+  /// would tell a teammate holding a correct code that it is wrong.
   static Future<JoinCodeMatch> resolveJoinCode({
     required String regId,
     required String code,
   }) async {
     try {
-      final callable =
-          FirebaseFunctions.instance.httpsCallable('resolveJoinCode');
-      final result = await callable
-          .call<Map<String, dynamic>>({'regId': regId, 'code': code});
-      return joinCodeMatchFromCallable(result.data);
+      final data =
+          await _callable('resolveJoinCode', {'regId': regId, 'code': code});
+      return joinCodeMatchFromCallable(data);
     } catch (_) {
-      return const JoinCodeMatch('notFound');
+      return const JoinCodeMatch('error');
     }
   }
 
@@ -214,8 +426,10 @@ class RegistrationService {
   /// are the Task F3 promo-code stamp — all optional, populated by
   /// RegistrationFormPage from the InsiderPromoCodeField's validated
   /// [InsiderPromoOutcome] (empty/null when no code was entered).
-  /// Returns false when signed out or any write throws.
-  static Future<bool> submitIndividual({
+  /// Refuses (writing nothing) when a submission already exists or the
+  /// server could not confirm there is none ([guardNewSubmission]);
+  /// [SubmitOutcome.failed] when signed out or any write throws.
+  static Future<SubmitOutcome> submitIndividual({
     required String regId,
     required RegistrationConfig config,
     required Map<String, dynamic> answers,
@@ -224,9 +438,12 @@ class RegistrationService {
     String discountSource = '',
     double? discountPct,
     double? eligibleFee,
+    Map<String, dynamic> prefill = const {},
   }) async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return false;
+    if (user == null) return SubmitOutcome.failed;
+    final guard = await guardNewSubmission(regId, user.uid);
+    if (guard != SubmitOutcome.ok) return guard;
     final displayName = collapseTrailingSpaces(user.displayName ?? '');
     try {
       final submission = RegSubmission(
@@ -248,47 +465,23 @@ class RegistrationService {
       await FirebaseDatabase.instance
           .ref('Sign Ups/${target.league}/${target.season}/NotPaid/${user.uid}')
           .set(displayName);
-      await _writeBackProfile(user.uid, config.sport, answers);
-      return true;
+      await _writeBackProfile(user.uid, config.sport, answers, prefill);
+      return SubmitOutcome.ok;
     } catch (_) {
-      return false;
+      return SubmitOutcome.failed;
     }
   }
 
   /// Writes well-known answer keys back to the profile, using update() so
   /// unrelated fields are never clobbered (same nodes createDatabaseLocation
-  /// and addUpdateInfo in lib/misc/utility.dart write).
-  static Future<void> _writeBackProfile(
-      String uid, String sport, Map<String, dynamic> answers) async {
+  /// and addUpdateInfo in lib/misc/utility.dart write) — and only the ones
+  /// the fan changed from the form's [prefill] ([profileWriteBack]).
+  static Future<void> _writeBackProfile(String uid, String sport,
+      Map<String, dynamic> answers, Map<String, dynamic> prefill) async {
     final root = FirebaseDatabase.instance.ref('Users/$uid');
-    final rootUpdates = <String, Object?>{};
-    final firstName = answers['firstName'];
-    if (firstName is String && firstName.isNotEmpty) {
-      rootUpdates['First Name'] = firstName;
-    }
-    final lastName = answers['lastName'];
-    if (lastName is String && lastName.isNotEmpty) {
-      rootUpdates['Last Name'] = lastName;
-    }
-    final phone = answers['phone'];
-    if (phone != null && normalizePhone(phone.toString()).isNotEmpty) {
-      rootUpdates['Phone Number'] = normalizePhone(phone.toString());
-    }
-    if (rootUpdates.isNotEmpty) await root.update(rootUpdates);
-
-    final infoUpdates = <String, Object?>{};
-    final positions = answers['positions'];
-    final posField = positionsFieldForSport(sport);
-    if (positions is List && positions.isNotEmpty && posField.isNotEmpty) {
-      infoUpdates[posField] = positions.map((p) => p.toString()).join(';');
-    }
-    final age = int.tryParse(answers['age']?.toString() ?? '');
-    if (age != null) infoUpdates['Age'] = age;
-    final height = answers['height'];
-    if (height is String && height.isNotEmpty) infoUpdates['Height'] = height;
-    if (infoUpdates.isNotEmpty) {
-      await root.child('Information').update(infoUpdates);
-    }
+    final w = profileWriteBack(sport: sport, answers: answers, prefill: prefill);
+    if (w.root.isNotEmpty) await root.update(w.root);
+    if (w.info.isNotEmpty) await root.child('Information').update(w.info);
   }
 
   // -------- Teams (L1b) --------
@@ -301,9 +494,8 @@ class RegistrationService {
   static Future<RegTeam?> getTeam(String regId, String teamId) async {
     if (teamId.isEmpty) return null;
     try {
-      final snap = (await FirebaseDatabase.instance
-              .ref('Registrations/$regId/Teams/$teamId')
-              .once())
+      final snap = (await refreshingOnce(FirebaseDatabase.instance
+              .ref('Registrations/$regId/Teams/$teamId')))
           .snapshot;
       return RegTeam.fromNode(teamId, snap.value);
     } catch (_) {
@@ -372,8 +564,9 @@ class RegistrationService {
   /// same Task F3 promo-code stamp as submitIndividual — the code field is
   /// offered on the captain path too (spec §7), discounting the team fee
   /// when eligible.
-  /// Returns false when signed out or any write throws.
-  static Future<bool> submitCaptain({
+  /// Same refusals as [submitIndividual] (checked before the team is
+  /// created).
+  static Future<SubmitOutcome> submitCaptain({
     required String regId,
     required RegistrationConfig config,
     required String teamName,
@@ -383,9 +576,12 @@ class RegistrationService {
     String discountSource = '',
     double? discountPct,
     double? eligibleFee,
+    Map<String, dynamic> prefill = const {},
   }) async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return false;
+    if (user == null) return SubmitOutcome.failed;
+    final guard = await guardNewSubmission(regId, user.uid);
+    if (guard != SubmitOutcome.ok) return guard;
     final displayName = collapseTrailingSpaces(user.displayName ?? '');
     try {
       final teamNode =
@@ -419,25 +615,28 @@ class RegistrationService {
       await FirebaseDatabase.instance
           .ref('Sign Ups/${target.league}/${target.season}/NotPaid/${user.uid}')
           .set(displayName);
-      await _writeBackProfile(user.uid, config.sport, answers);
-      return true;
+      await _writeBackProfile(user.uid, config.sport, answers, prefill);
+      return SubmitOutcome.ok;
     } catch (_) {
-      return false;
+      return SubmitOutcome.failed;
     }
   }
 
   /// Joiner-path submit. When [team].codeWaivesPayment the submission is
   /// born Paid ('team code') and the legacy dual-write goes straight to the
   /// Paid bucket; otherwise it lands in NotPaid exactly like an individual.
-  /// Returns false when signed out or any write throws.
-  static Future<bool> submitJoiner({
+  /// Same refusals as [submitIndividual].
+  static Future<SubmitOutcome> submitJoiner({
     required String regId,
     required RegistrationConfig config,
     required RegTeam team,
     required Map<String, dynamic> answers,
+    Map<String, dynamic> prefill = const {},
   }) async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return false;
+    if (user == null) return SubmitOutcome.failed;
+    final guard = await guardNewSubmission(regId, user.uid);
+    if (guard != SubmitOutcome.ok) return guard;
     final displayName = collapseTrailingSpaces(user.displayName ?? '');
     try {
       final waived = team.codeWaivesPayment;
@@ -461,12 +660,78 @@ class RegistrationService {
       await FirebaseDatabase.instance
           .ref('Sign Ups/${target.league}/${target.season}/$bucket/${user.uid}')
           .set(displayName);
-      await _writeBackProfile(user.uid, config.sport, answers);
-      return true;
+      await _writeBackProfile(user.uid, config.sport, answers, prefill);
+      return SubmitOutcome.ok;
     } catch (_) {
-      return false;
+      return SubmitOutcome.failed;
     }
   }
+}
+
+/// Which legacy Sign Ups bucket a resumed submit must fill in (review fix
+/// Minor 1), or null for nothing: no submission, an entry already in either
+/// bucket (never downgrade a Paid entry), or a submission paid some other
+/// way (the Manager's flip moves it). Same buckets the submit writes: a
+/// team-code-waived joiner is born Paid, everyone else NotPaid.
+String? legacyRepairBucket({
+  required RegSubmission? submission,
+  required bool notPaidExists,
+  required bool paidExists,
+}) {
+  if (submission == null || notPaidExists || paidExists) return null;
+  if (!submission.paid) return 'NotPaid';
+  if (submission.paidVia == 'team code') return 'Paid';
+  return null;
+}
+
+/// What the registration write-back writes (fresh reads, Task 3, #75): only
+/// the well-known answers the fan CHANGED from the form's [prefill]. The
+/// prefill is read from `Users/<uid>` and may be the phone's saved copy; an
+/// untouched (maybe stale) value is never written back over a newer one set
+/// by the Manager or another device. A field the profile did not have is a
+/// change. Phone numbers compare normalized.
+({Map<String, Object?> root, Map<String, Object?> info}) profileWriteBack({
+  required String sport,
+  required Map<String, dynamic> answers,
+  required Map<String, dynamic> prefill,
+}) {
+  final root = <String, Object?>{};
+  final info = <String, Object?>{};
+  String text(Object? v) => v?.toString() ?? '';
+
+  for (final (key, field) in [
+    ('firstName', 'First Name'),
+    ('lastName', 'Last Name'),
+  ]) {
+    final v = answers[key];
+    if (v is String && v.isNotEmpty && v != text(prefill[key])) root[field] = v;
+  }
+  final phone = answers['phone'];
+  if (phone != null) {
+    final n = normalizePhone(phone.toString());
+    if (n.isNotEmpty && n != normalizePhone(text(prefill['phone']))) {
+      root['Phone Number'] = n;
+    }
+  }
+
+  final positions = answers['positions'];
+  final posField = positionsFieldForSport(sport);
+  if (positions is List && positions.isNotEmpty && posField.isNotEmpty) {
+    final joined = positions.map((p) => p.toString()).join(';');
+    final before = prefill['positions'];
+    final beforeJoined =
+        before is List ? before.map((p) => p.toString()).join(';') : '';
+    if (joined != beforeJoined) info[posField] = joined;
+  }
+  final age = int.tryParse(text(answers['age']));
+  if (age != null && age != int.tryParse(text(prefill['age']))) {
+    info['Age'] = age;
+  }
+  final height = answers['height'];
+  if (height is String && height.isNotEmpty && height != text(prefill['height'])) {
+    info['Height'] = height;
+  }
+  return (root: root, info: info);
 }
 
 // ---------------------------------------------------------------------------

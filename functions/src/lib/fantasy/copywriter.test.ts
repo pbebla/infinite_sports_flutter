@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { FetchLike } from '../support';
 import {
   buildCopyPrompt, clampText, COPY_LIMITS, copySystemPrompt, isCopyMode,
-  loadCopyCards, parseCopy, writeCopy,
+  dollarPrices, loadCopyCards, parseCopy, writeCopy,
 } from './copywriter';
 import { NEWS_MODEL } from './news';
 import { PlayerCard } from './news_cards';
@@ -40,6 +40,18 @@ describe('copySystemPrompt', () => {
       expect(p).toContain('NEVER mean');
       expect(p).toContain('Use ONLY the facts');
       expect(p).toContain('Reply with ONLY a JSON object {"title": string, "body": string}');
+    }
+  });
+
+  it('prices are always written with a leading "$" (release report #9: a body said "7.0M" next to a "$7.0M" card)', () => {
+    for (const mode of ['post', 'push', 'message'] as const) {
+      const p = copySystemPrompt(mode);
+      expect(p).toContain('Prices are always written with a leading "$" (e.g. "$7.0M")');
+      // The card-field explanation itself never models a bare price.
+      expect(p).toContain('(75 = $7.5M)');
+      expect(p).toContain('(5 = up $0.5M)');
+      expect(p).not.toContain('= 7.5M');
+      expect(p).not.toContain('up 0.5M');
     }
   });
 });
@@ -270,5 +282,47 @@ describe('loadCopyCards (the callable\'s facts)', () => {
     expect(cards.map((c) => c.name)).toEqual(['Alex', 'Sam', 'Bea', 'P1', 'P2']);
     expect(await loadCopyCards(db, { sport: 'Futsal', season: '15', names: [] }))
       .toEqual([]);
+  });
+});
+
+// Fix round 1, M4: a deterministic "$" on price-shaped tokens in the
+// model's OUTPUT (the prompt line alone cannot guarantee it).
+describe('dollarPrices', () => {
+  it('adds the "$" to a bare price', () => {
+    expect(dollarPrices('The ATT is priced at 7.0M and rising'))
+      .toBe('The ATT is priced at $7.0M and rising');
+    expect(dollarPrices('7.0M for a keeper!')).toBe('$7.0M for a keeper!');
+    expect(dollarPrices('(up 0.5M to 12.5M)')).toBe('(up $0.5M to $12.5M)');
+    expect(dollarPrices('Now 8.5M.')).toBe('Now $8.5M.');
+    expect(dollarPrices('7.0M, 6.5M')).toBe('$7.0M, $6.5M');
+  });
+
+  it('leaves everything else alone', () => {
+    for (const t of [
+      'Already $7.0M here',
+      '$12.5M stays',
+      '13 goals and 5 assists',
+      '10% of managers',
+      'GW12 points',
+      '7M flat', // no tenths: not the app's price shape
+      '123.4M', // three digits before the dot
+      '7.05M', // two decimals
+      'A7.0M', // inside a word
+      '1.7.0M', // inside a longer number
+      '7.0Mb',
+      '7.0 M',
+    ]) {
+      expect(dollarPrices(t)).toBe(t);
+    }
+  });
+
+  it('parseCopy applies it to both the title and the body', () => {
+    expect(parseCopy('{"title":"Now 7.0M","body":"Was 6.5M, now 7.0M."}', 'post'))
+      .toEqual({ title: 'Now $7.0M', body: 'Was $6.5M, now $7.0M.' });
+  });
+
+  it('the prompt makes prices the stated exception to "numbers exactly as written"', () => {
+    const p = copySystemPrompt('post');
+    expect(p).toMatch(/exactly as written \(prices excepted/);
   });
 });

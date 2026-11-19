@@ -68,6 +68,18 @@ export function normalizeCategory(raw: string): CategoryKey {
   return 'other';
 }
 
+/** The display label ONLY when [raw] is on the app's fixed category list
+ *  (a key or a label, case/whitespace-insensitive); null for anything else.
+ *  Used where client text must not reach a person's inbox (unverified
+ *  addresses): an unknown value is omitted, never echoed. */
+export function fixedCategoryLabel(raw: string): string | null {
+  const v = String(raw ?? '').trim().toLowerCase();
+  for (const key of CATEGORY_KEYS) {
+    if (key === v || CATEGORY_LABELS[key].toLowerCase() === v) return CATEGORY_LABELS[key];
+  }
+  return null;
+}
+
 /** Human display label for a category ("Something is broken", ...). */
 export function categoryLabel(raw: string): string {
   return CATEGORY_LABELS[normalizeCategory(raw)];
@@ -146,6 +158,38 @@ export function mailLogEntry(input: {
 }
 
 // ---------------------------------------------------------------------------
+// Server-side mail caps (per uid, rolling hour). The app's own rate limit is
+// a courtesy; these are the real ones. Stored by the functions at
+// Support/MailCaps/<uid>/<kind> as the send timestamps of the last hour
+// (pruned on every write, so the node holds at most `limit` numbers). No
+// client rule grants that node: it is functions-only.
+// ---------------------------------------------------------------------------
+
+export const MAIL_CAP_WINDOW_MS = 60 * 60 * 1000;
+
+/** Ack: ticket acknowledgements to the person. Reply: "user replied"
+ *  notices to the support inbox. */
+export const MAIL_CAPS = { Ack: 6, Reply: 20 } as const;
+export type MailCapKind = keyof typeof MAIL_CAPS;
+
+/** One transaction step: the pruned stamps plus [nowMs] when another send
+ *  fits under [limit] in the window, else null (over the cap - abort, send
+ *  nothing). Tolerates a list- or map-shaped node and ignores junk. Pure. */
+export function mailCapStep(
+  current: unknown, nowMs: number, limit: number, windowMs: number = MAIL_CAP_WINDOW_MS,
+): number[] | null {
+  const raw = Array.isArray(current)
+    ? current
+    : current !== null && typeof current === 'object' ? Object.values(current as object) : [];
+  const recent = raw
+    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
+    .filter((t) => nowMs - t < windowMs)
+    .sort((a, b) => a - b);
+  if (recent.length >= limit) return null;
+  return [...recent, nowMs];
+}
+
+// ---------------------------------------------------------------------------
 // Subjects (all pass through sanitizeSubject — header-injection safe)
 // ---------------------------------------------------------------------------
 
@@ -203,12 +247,33 @@ export function ackEmailHtml(input: {
   );
 }
 
+/** Acknowledgement for an account whose Auth address is NOT verified: the
+ *  address may not belong to the person who wrote the ticket, so the email
+ *  carries no client-supplied text at all - no name, no message, no
+ *  free-text category (a category on the fixed list is named). Only the
+ *  server-assigned ticket number and fixed wording. */
+export function ackEmailHtmlUnverified(input: { num: string; category: string }): string {
+  const label = fixedCategoryLabel(input.category);
+  return emailShell(
+    `<p>We received your support request #${escapeHtml(input.num)}.` +
+    (label ? ` Category: <strong>${escapeHtml(label)}</strong>.` : '') +
+    `</p>` +
+    `<p>You can follow it in the app under <strong>Help &amp; Feedback → My Tickets</strong>.</p>`,
+  );
+}
+
+const UNVERIFIED_INBOX_LINE =
+  `<p style="color:${BRAND};font-size:13px;"><strong>Email not verified — reply in the ` +
+  `Manager, not by email.</strong></p>`;
+
 /** New-ticket email to the support inbox: message first, then the captured
  *  context (platform, app version, screen, screenshot count, uid). */
 export function newTicketEmailHtml(input: {
   num: string; name: string; email: string; uid: string; category: string;
   message: string; platform: string; appVersion: string; screen: string;
   screenshotCount: number;
+  /** false: no Reply-To was set (the account address is unverified). */
+  emailVerified?: boolean;
 }): string {
   const row = (label: string, value: string) =>
     `<tr><td style="padding:2px 12px 2px 0;color:#666;">${label}</td>` +
@@ -225,19 +290,24 @@ export function newTicketEmailHtml(input: {
     row('Screenshots', String(input.screenshotCount)) +
     row('Uid', input.uid) +
     `</table>` +
-    `<p style="color:#666;font-size:13px;">Reply-To is set to the user — but app ` +
-    `replies go through the Manager Support inbox.</p>`,
+    (input.emailVerified === false
+      ? UNVERIFIED_INBOX_LINE
+      : `<p style="color:#666;font-size:13px;">Reply-To is set to the user — but app ` +
+        `replies go through the Manager Support inbox.</p>`),
   );
 }
 
 /** User-reply email to the support inbox (ticket reopened -> 'open'). */
 export function replyNoticeEmailHtml(input: {
   num: string; name: string; text: string;
+  /** false: no Reply-To was set (the account address is unverified). */
+  emailVerified?: boolean;
 }): string {
   return emailShell(
     `<p><strong>${escapeHtml(input.name)}</strong> replied on ticket ` +
     `<strong>#${escapeHtml(input.num)}</strong> (status is back to <strong>Open</strong>):</p>` +
-    quoteBlock(escapeMultiline(input.text)),
+    quoteBlock(escapeMultiline(input.text)) +
+    (input.emailVerified === false ? UNVERIFIED_INBOX_LINE : ''),
   );
 }
 
@@ -336,20 +406,18 @@ export const JOKE_SYSTEM_PROMPT =
   'ORIGINAL line in its comedic voice (channel a signature character, ' +
   'catchphrase-style, or running gag — do not copy long quotes verbatim): ' +
   `${JOKE_FRANCHISES.join('; ')}. ` +
-  "Match the ticket's category and content. One or two sentences max. " +
+  "Match the ticket's category. One or two sentences max. " +
   'Snarky/sarcastic welcome; playful, never cruel or mocking of the user. ' +
   'No emoji spam (one at most). Reply with the one-liner only — no preamble, ' +
   'no quotes around it, no naming the show unless the line itself does.';
 
-const JOKE_MESSAGE_MAX_CHARS = 1_500;
-
-/** The user turn sent to the model: category + (truncated) ticket message. */
-export function buildJokePrompt(category: string, message: string): string {
-  const trimmed = message.length > JOKE_MESSAGE_MAX_CHARS
-    ? `${message.slice(0, JOKE_MESSAGE_MAX_CHARS)}…`
-    : message;
-  return `Ticket category: ${categoryLabel(category)}\n` +
-    `Ticket message:\n"""\n${trimmed}\n"""\n` +
+/** The user turn sent to the model: the ticket CATEGORY only. The person's
+ *  own words never leave our servers for the AI service (the Privacy Policy
+ *  says only public fantasy statistics go there); a missing/unknown category
+ *  is the generic 'Something else' (normalizeCategory). Extra arguments from
+ *  an older caller are ignored. */
+export function buildJokePrompt(category: string): string {
+  return `Ticket category: ${categoryLabel(String(category ?? ''))}\n` +
     'Write the closing one-liner now.';
 }
 
@@ -383,7 +451,6 @@ export interface JokeResult { joke: string; source: 'ai' | 'bank'; }
  *  canned bank on missing key / API error / timeout. Never throws. */
 export async function generateJoke(opts: {
   category: string;
-  message: string;
   apiKey: string;
   fetchImpl?: FetchLike;
   timeoutMs?: number;
@@ -409,7 +476,7 @@ export async function generateJoke(opts: {
         model: JOKE_MODEL,
         max_tokens: 150,
         system: JOKE_SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: buildJokePrompt(opts.category, opts.message) }],
+        messages: [{ role: 'user', content: buildJokePrompt(opts.category) }],
       }),
       signal: controller.signal,
     });

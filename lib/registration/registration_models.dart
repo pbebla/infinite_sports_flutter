@@ -8,6 +8,9 @@
 
 import 'dart:math';
 
+import 'package:infinite_sports_flutter/registration/promo_engine.dart'
+    show bestDiscountedTotal;
+
 // ---------------------------------------------------------------------------
 // Question model
 // ---------------------------------------------------------------------------
@@ -433,10 +436,19 @@ class RegSubmission {
   /// only), so the status page renders the team card from this field.
   final String teamName; // '' on pre-B8 and non-team submissions
   final bool paid;
-  final String paidVia; // '' | 'team code' | 'card' | 'manual'
+  /// How it was paid: '' | 'team code' | 'card' | 'manual' | 'venmo' |
+  /// 'zelle' | 'cash' | 'no charge' ([kPaidViaNoCharge]; an admin settled it
+  /// with nothing to pay — always with Paid true, PaidAmount 0).
+  final String paidVia;
   final num? paidAmount; // dollars actually charged/recorded; null if unknown
   final String displayName; // account display name at submit time
   final int submittedAt; // millisecondsSinceEpoch
+
+  /// An admin settled this registration as "No charge": Paid, with nothing to
+  /// pay. Twin of the Manager app's `isNoCharge` (same name, same rule). The
+  /// player sees "No charge" instead of "Paid"; teammates still see Paid.
+  bool get isNoCharge =>
+      paid && paidVia.trim().toLowerCase() == kPaidViaNoCharge;
 
   // -- Manual payment adjustment (Infinite Insiders P1, Task M1/F1) ----
   // Written by the Manager's RegistrationService.adjustSubmissionAmount/
@@ -781,7 +793,8 @@ String? validateJoinCode(String code, {Set<String> taken = const {}}) {
 
 /// Outcome of matching an entered code against a registration's teams.
 /// status: 'ok' (approved team found — [team] set), 'notApproved' (the code
-/// belongs to a pending/rejected team — [team] set), 'notFound'.
+/// belongs to a pending/rejected team — [team] set), 'notFound', or 'error'
+/// (the server lookup itself failed — the code may well be right).
 class JoinCodeMatch {
   final String status;
   final RegTeam? team;
@@ -835,4 +848,180 @@ num amountOwed({
     return 0;
   }
   return submission.path == 'captain' ? config.teamFee : config.fee;
+}
+
+/// [amount] rounded to whole cents — the unit Stripe charges in. Every
+/// "how much is owed" number goes through this ONE rounding so the status
+/// page, the form page, the payment screen and the server always agree
+/// (a $0.00255 remainder is $0.00 everywhere, never "covered" on one
+/// screen and "pay" on another).
+double roundToCents(double amount) => (amount * 100).round() / 100;
+
+/// The discounted total for [baseFee] given [submission]'s stamped
+/// discount (null submission = no discount), in whole cents — what the
+/// payment screen shows as "Total due".
+double discountedTotal({
+  required double baseFee,
+  RegSubmission? submission,
+}) =>
+    roundToCents(bestDiscountedTotal(
+      baseFee: baseFee,
+      eligibleFee: submission?.eligibleFee,
+      adjustedFee: submission?.adjustedFee,
+      discountPct: submission?.discountPct,
+      discountSource: submission?.discountSource ?? '',
+    ));
+
+/// What this submission owes RIGHT NOW after any stamped discount — the
+/// same [bestDiscountedTotal] the payment screen shows as "Total due"
+/// (manual admin adjustment, first-timer promo or Insider tier discount).
+/// 0 whenever [paymentOwed] says nothing is owed at all (a stale adjustment
+/// on a submission that owes nothing never invents a debt).
+double discountedAmountOwed({
+  required RegistrationConfig config,
+  required RegSubmission submission,
+  bool codeWaivesPayment = false,
+}) {
+  if (!paymentOwed(
+      config: config,
+      submission: submission,
+      codeWaivesPayment: codeWaivesPayment)) {
+    return 0;
+  }
+  return discountedTotal(
+    baseFee: amountOwed(
+            config: config,
+            submission: submission,
+            codeWaivesPayment: codeWaivesPayment)
+        .toDouble(),
+    submission: submission,
+  );
+}
+
+/// What a registration's status chip says (way back fix round, Minor 1):
+/// THE decision the status page's top chip and the registration list's
+/// chip share, so they can never disagree.
+/// The stored `PaidVia` of a "No charge" registration (twin of the Manager
+/// app's constant).
+const String kPaidViaNoCharge = 'no charge';
+
+/// The chip text for a No charge registration.
+const String kNoChargeLabel = 'No charge';
+
+enum RegistrationChipKind { paid, covered, noCharge, pending }
+
+/// The chip for [submission] under [config] — exactly the status page's
+/// rule: Paid ("Paid via team code" when born paid by a team code);
+/// "Covered" only when a payment WAS owed and a discount/comp brought it
+/// to 0 ([paymentCovered]); "No charge" when an admin settled it that way
+/// ([RegSubmission.isNoCharge]) OR nothing is owed on this player's path (a
+/// free registration, or an individual when only a team fee is charged);
+/// the server stamps the real No charge only on registrations that cost
+/// nothing in their payment mode, so a path-only-free player (a captain under
+/// perPlayer with a fee, an individual under teamFee with a team fee) sees
+/// "No charge" here but is not stamped: the Manager shows Not paid until the
+/// owner marks them;
+/// otherwise "Payment pending".
+/// [owed] is the amount the status page shows as owed (through
+/// discountedTotal); the list words a pending chip with it ("You owe $X")
+/// when it is above 0.
+({RegistrationChipKind kind, String label, double owed, bool settled})
+    registrationChipFor({
+  required RegistrationConfig config,
+  required RegSubmission submission,
+  bool codeWaivesPayment = false,
+}) {
+  final owed = discountedAmountOwed(
+      config: config,
+      submission: submission,
+      codeWaivesPayment: codeWaivesPayment);
+  if (submission.isNoCharge) {
+    return (
+      kind: RegistrationChipKind.noCharge,
+      label: kNoChargeLabel,
+      owed: 0,
+      settled: true,
+    );
+  }
+  if (submission.paid) {
+    return (
+      kind: RegistrationChipKind.paid,
+      label: submission.paidVia == 'team code' ? 'Paid via team code' : 'Paid',
+      owed: 0,
+      settled: true,
+    );
+  }
+  if (paymentCovered(
+      config: config,
+      submission: submission,
+      codeWaivesPayment: codeWaivesPayment)) {
+    return (
+      kind: RegistrationChipKind.covered,
+      label: 'Covered',
+      owed: 0,
+      settled: true,
+    );
+  }
+  // Nothing owed and not a comp: no fee applies on this player's path. Says
+  // "No charge". The server stamps the real Paid/No charge only when the whole
+  // registration costs nothing in its payment mode; a path-only-free player
+  // (captain under perPlayer with a fee, individual under teamFee with a team
+  // fee) is not stamped and the Manager shows Not paid until the owner marks
+  // them.
+  if (!paymentOwed(
+      config: config,
+      submission: submission,
+      codeWaivesPayment: codeWaivesPayment)) {
+    return (
+      kind: RegistrationChipKind.noCharge,
+      label: kNoChargeLabel,
+      owed: 0,
+      settled: true,
+    );
+  }
+  return (
+    kind: RegistrationChipKind.pending,
+    label: 'Payment pending',
+    owed: owed,
+    settled: false,
+  );
+}
+
+/// True when a fee applies to this submission but its discounted total
+/// (already in whole cents) is $0 — an admin comp to $0 or a 100% discount: "Nothing to pay — you're
+/// covered", never "Payment pending" with a $0 pay button.
+bool paymentCovered({
+  required RegistrationConfig config,
+  required RegSubmission submission,
+  bool codeWaivesPayment = false,
+}) =>
+    paymentOwed(
+        config: config,
+        submission: submission,
+        codeWaivesPayment: codeWaivesPayment) &&
+    discountedAmountOwed(
+            config: config,
+            submission: submission,
+            codeWaivesPayment: codeWaivesPayment) ==
+        0;
+
+/// Every registration config in the mirror, whatever its Status (null-safe
+/// parse; malformed children skipped). Lives with the models so the service
+/// and my_registrations.dart share it without importing each other (way back
+/// fix round, Minor 5).
+Map<String, RegistrationConfig> allRegistrationsFromNode(Object? raw) {
+  final out = <String, RegistrationConfig>{};
+  void add(String regId, Object? node) {
+    final config = RegistrationConfig.fromFirebase(node);
+    if (config != null) out[regId] = config;
+  }
+
+  if (raw is Map) {
+    raw.forEach((regId, node) => add(regId.toString(), node));
+  } else if (raw is List) {
+    for (var i = 0; i < raw.length; i++) {
+      add('$i', raw[i]);
+    }
+  }
+  return out;
 }

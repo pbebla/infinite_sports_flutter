@@ -62,7 +62,7 @@ void main() {
     testWidgets('renders team name before the position', (tester) async {
       await _pumpStats(tester, [_futsal]);
 
-      expect(find.text('Lamassu · Defender'), findsOneWidget);
+      expect(find.text('Lamassu · Position: Defender'), findsOneWidget);
       // No logo URL resolved → name only, no broken image / fallback shield.
       expect(find.byType(TeamLogo), findsNothing);
     });
@@ -78,7 +78,7 @@ void main() {
       );
       await _pumpStats(tester, [comp]);
 
-      expect(find.text('Lamassu · Defender'), findsOneWidget);
+      expect(find.text('Lamassu · Position: Defender'), findsOneWidget);
       expect(
         find.byWidgetPredicate((w) =>
             w is TeamLogo && w.url == 'https://example.com/lamassu.png'),
@@ -95,7 +95,7 @@ void main() {
       );
       await _pumpStats(tester, [comp]);
 
-      expect(find.text('Defender'), findsOneWidget);
+      expect(find.text('Position: Defender'), findsOneWidget);
       expect(find.byType(TeamLogo), findsNothing);
     });
   });
@@ -123,8 +123,8 @@ void main() {
       expect(find.text('Futsal · Season 15'), findsOneWidget);
       expect(find.text('Basketball · Season 5'), findsOneWidget);
       // Each card keeps its own team + position header line.
-      expect(find.text('Lamassu · Defender'), findsOneWidget);
-      expect(find.text('Akkad · Guard'), findsOneWidget);
+      expect(find.text('Lamassu · Position: Defender'), findsOneWidget);
+      expect(find.text('Akkad · Position: Guard'), findsOneWidget);
     });
 
     testWidgets('single-competition selection still works after Show all',

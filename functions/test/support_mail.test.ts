@@ -44,8 +44,9 @@ describe('sendSupportMail', () => {
     });
     expect(log).toHaveLength(1);
     expect(log[0].path).toBe('Support/MailLog');
+    // The MailLog stores the masked address only (nothing reads the raw one).
     expect(log[0].value).toEqual({
-      To: 'z@example.com', Subject: 'Hello', Ok: true, At: { '.sv': 'timestamp' },
+      To: 'z•@example.com', Subject: 'Hello', Ok: true, At: { '.sv': 'timestamp' },
     });
   });
 

@@ -12,6 +12,10 @@
 //   [FantasyLeagueGamesFeed]: the season's legacy start hour → the league
 //   games derived with it.
 //
+//   [FantasyLeagueTableFeed]: the season's standings + crest map for the
+//   Fantasy Hub's League tab (re-subscribes with the crests; ready waits for
+//   both).
+//
 //   [FantasySeasonFinishedFeed]: the league's own `Finished` flag — the
 //   screens drop their price arrows once the season is over.
 //
@@ -22,9 +26,13 @@
 //   • a REAL null Config (fantasy removed) clears the schedule, cancels its
 //     listener and drops the cached schedule (an error is NOT "removed");
 //   • every stream has an error handler: logged with debugPrint, the last
-//     good value kept; with nothing good yet the gates still open ("no
-//     data"), never an eternal skeleton; a stream that cannot even be
-//     created (no Firebase app in a widget test) degrades the same way;
+//     good value kept; with nothing good yet the gates still open on an
+//     empty schedule — but [FantasyScheduleFeed.scheduleUnknown] says it is
+//     UNKNOWN, not "no gameweeks" (review 6, I2: never "Season complete" or
+//     "Locked" from a failed read), and the Config / schedule stream is
+//     re-subscribed on the shared bounded back-off; a stream that cannot
+//     even be created (no Firebase app in a widget test) degrades the same
+//     way without retries;
 //   • the schedule resubscribes only when the lock hour or the owner's
 //     schedule overrides change (moved deadlines, skipped days, the kickoff
 //     margin — every one of them moves a week); the per-week listener only
@@ -48,14 +56,88 @@
 
 import 'dart:async';
 
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show AppLifecycleListener;
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/misc/bounded_read.dart';
+import 'package:infinite_sports_flutter/misc/feed_backoff.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
+import 'package:infinite_sports_flutter/misc/team_logos.dart';
+import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
+
+/// Back-off between re-subscriptions after a stream error (an RTDB onValue
+/// stream ends after an error); the feed gives up after the last one and the
+/// next screen open starts a fresh feed. Shared by the season-finished feed,
+/// the schedule feed (review 6, I2) and the team-logo feed through
+/// [FeedBackoff] (lib/misc/feed_backoff.dart).
+const List<Duration> kFantasyFeedRetryDelays = kFeedRetryDelays;
+
+/// Where a failing feed's recovery stands (re-review 6b, item 2): [none] —
+/// nothing failed (or a real answer came back); [retrying] — a retry is
+/// scheduled or in flight; [gaveUp] — the bounded retries are used up (or the
+/// stream could not even be created): only a trigger — the app returning to
+/// the foreground, the database connection coming back, or the fan's "Try
+/// again" ([FantasyScheduleFeed.restart]) — starts it again.
+enum FantasyFeedRetry { none, retrying, gaveUp }
+
+/// The shared bounded re-subscribe schedule (lib/misc/feed_backoff.dart).
+typedef _Backoff = FeedBackoff;
+
+/// Restarts a failing feed by itself (re-review 6b, item 2): when the app
+/// returns to the foreground and when the database connection comes back
+/// (`.info/connected` turning true after false). Only runs while its feed is
+/// failing; [stop] (and the feed's dispose) removes both listeners.
+class _AutoRecovery {
+  _AutoRecovery(this._onTrigger);
+  final void Function() _onTrigger;
+
+  /// Test seam replacing `.info/connected` for every feed.
+  static Stream<bool>? connectedStatesOverride;
+
+  AppLifecycleListener? _lifecycle;
+  StreamSubscription<bool>? _connected;
+  bool? _lastConnected;
+
+  bool get running => _lifecycle != null;
+
+  void start() {
+    if (running) return;
+    _lifecycle = AppLifecycleListener(onResume: _onTrigger);
+    _lastConnected = null;
+    try {
+      final source = connectedStatesOverride ??
+          FirebaseDatabase.instance
+              .ref('.info/connected')
+              .onValue
+              .map((e) => e.snapshot.value == true);
+      _connected = source.listen((connected) {
+        final was = _lastConnected;
+        _lastConnected = connected;
+        // A transition back to connected — never the first report.
+        if (connected && was == false) _onTrigger();
+      }, onError: (Object _) {});
+    } catch (_) {
+      // No database (widget tests): the foreground trigger still works.
+    }
+  }
+
+  void stop() {
+    _lifecycle?.dispose();
+    _lifecycle = null;
+    _connected?.cancel();
+    _connected = null;
+  }
+}
+
+/// Test seam: every fantasy feed's `.info/connected` source (null = real).
+set debugFantasyConnectedStates(Stream<bool>? s) =>
+    _AutoRecovery.connectedStatesOverride = s;
 
 /// `<owner>: <what> failed: <error>` — the fantasy screens' log line shape.
 void _logFailure(String owner, String what, Object error) =>
@@ -170,6 +252,16 @@ class FantasyScheduleFeed<W> {
   W? _weekData;
   bool _weekLoaded = false;
 
+  bool _scheduleFromError = false;
+  late final _Backoff _configRetry = _Backoff(() => _disposed);
+  late final _Backoff _scheduleRetry = _Backoff(() => _disposed);
+  bool _configSubscribing = false;
+  bool _scheduleSubscribing = false;
+  Stream<List<Gameweek>> Function()? _scheduleMake;
+
+  /// Restarts the reads by itself while the schedule is unknown.
+  late final _AutoRecovery _recovery = _AutoRecovery(restart);
+
   StreamSubscription<FantasyConfigState?>? _configSub;
   StreamSubscription<List<Gameweek>>? _gameweeksSub;
   StreamSubscription<W>? _weekSub;
@@ -190,6 +282,39 @@ class FantasyScheduleFeed<W> {
   /// The schedule; null until it is known (an emission, the session cache,
   /// or an error / null Config → empty).
   List<Gameweek>? get gameweeks => _gameweeks;
+
+  /// The schedule shown is EMPTY only because a read failed (the Config or
+  /// the schedule stream errored before any good value): what the deadline
+  /// is, is UNKNOWN — distinct from a real absent Config or a schedule with
+  /// no more gameweeks. Cleared by the next real answer.
+  bool get scheduleUnknown => _scheduleFromError;
+
+  /// While [scheduleUnknown]: still retrying, or given up (re-review 6b,
+  /// item 2); [FantasyFeedRetry.none] once the schedule is known.
+  FantasyFeedRetry get scheduleRetry {
+    if (!_scheduleFromError) return FantasyFeedRetry.none;
+    return _configRetry.active || _scheduleRetry.active
+        ? FantasyFeedRetry.retrying
+        : FantasyFeedRetry.gaveUp;
+  }
+
+  /// Starts reading again now with a fresh back-off — the fan's "Try again",
+  /// and what the app returning to the foreground / the connection coming
+  /// back do by themselves. A no-op unless the schedule is unknown.
+  void restart() {
+    if (_disposed || !_started || !_scheduleFromError) return;
+    final make = _scheduleMake;
+    if (_config == null || make == null) {
+      // The Config itself never answered: read it again.
+      _configRetry.startNow();
+      _subscribeConfig();
+    } else {
+      _scheduleRetry.startNow();
+      _gameweeksSub?.cancel();
+      _listenSchedule(make);
+    }
+    _notify();
+  }
 
   /// The per-week listener's last good value (null: none yet).
   W? get weekData => _weekData;
@@ -221,6 +346,17 @@ class FantasyScheduleFeed<W> {
       _syncWeeks(); // a cached schedule starts the week listener at once
       final seam = gameweekStates;
       if (seam != null) _listenSchedule(() => seam);
+      _subscribeConfig();
+    } finally {
+      _starting = false;
+    }
+  }
+
+  void _subscribeConfig() {
+    _configSub?.cancel();
+    _configSub = null;
+    _configSubscribing = true;
+    try {
       _configSub = _listenLogged<FantasyConfigState?>(
         owner: owner,
         what: 'config feed',
@@ -230,7 +366,7 @@ class FantasyScheduleFeed<W> {
         onError: _onConfigError,
       );
     } finally {
-      _starting = false;
+      _configSubscribing = false;
     }
   }
 
@@ -255,6 +391,9 @@ class FantasyScheduleFeed<W> {
 
   void dispose() {
     _disposed = true;
+    _configRetry.cancel();
+    _scheduleRetry.cancel();
+    _recovery.stop();
     _configSub?.cancel();
     _gameweeksSub?.cancel();
     _weekSub?.cancel();
@@ -264,13 +403,22 @@ class FantasyScheduleFeed<W> {
   // ── Internals ────────────────────────────────────────────────────────────
 
   void _notify() {
-    if (!_disposed && !_starting) onChanged();
+    // Auto-recovery runs only while the schedule is unknown.
+    if (_disposed) return;
+    if (_scheduleFromError) {
+      _recovery.start();
+    } else {
+      _recovery.stop();
+    }
+    if (!_starting) onChanged();
   }
 
   void _onConfig(FantasyConfigState? state) {
     _config = state;
     _configLoaded = true;
     _configAbsent = state == null;
+    _configRetry.cancel();
+    _configRetry.reset();
     if (state == null) {
       // Fantasy removed for the season: nothing stale may seed a revisit.
       _gameweeksSession.remove(_sessionKey);
@@ -278,7 +426,10 @@ class FantasyScheduleFeed<W> {
         _gameweeksSub?.cancel();
         _gameweeksSub = null;
         _scheduleKey = null;
+        _scheduleMake = null;
+        _scheduleRetry.cancel();
         _gameweeks = const [];
+        _scheduleFromError = false; // a REAL "no fantasy" — a fact
       }
     } else if (_derived) {
       // Weeks and deadlines move only with the lock hour and the owner's
@@ -301,34 +452,75 @@ class FantasyScheduleFeed<W> {
   }
 
   /// The LAST GOOD config stays: an error is not "fantasy removed". With no
-  /// schedule yet none can be derived — an empty one keeps gates open.
+  /// schedule yet none can be derived — an empty one keeps gates open, marked
+  /// UNKNOWN. A stream error ends the stream: re-subscribe on the back-off.
   void _onConfigError() {
     _configLoaded = true;
-    if (_derived) _gameweeks ??= const [];
+    if (_derived && _gameweeks == null) {
+      _gameweeks = const [];
+      _scheduleFromError = true;
+    }
+    // An RTDB stream ends after an error: unless it answers again first,
+    // re-subscribe on the back-off (the retry is dropped by the next data).
+    if (_configSubscribing) {
+      _configRetry.cancel(); // could not even subscribe: nothing in flight
+    } else {
+      _configRetry.retry(_subscribeConfig);
+    }
     _syncWeeks();
     _notify();
   }
 
   void _listenSchedule(Stream<List<Gameweek>> Function() make) {
     _gameweeksSub = null;
-    _gameweeksSub = _listenLogged<List<Gameweek>>(
-      owner: owner,
-      what: 'schedule feed',
-      make: make,
-      disposed: () => _disposed,
-      onData: (gws) {
-        if (_derived) _gameweeksSession[_sessionKey] = gws;
-        _gameweeks = gws;
-        _syncWeeks();
-        _notify();
-      },
-      onError: () {
-        // Never cached; a schedule already showing stays.
-        _gameweeks ??= const [];
-        _syncWeeks();
-        _notify();
-      },
-    );
+    if (!identical(_scheduleMake, make)) {
+      // A new schedule source (lock hour / overrides moved): any retry of
+      // the old one is void, and failures start a fresh back-off.
+      _scheduleRetry.cancel();
+      _scheduleRetry.reset();
+    }
+    _scheduleMake = make;
+    _scheduleSubscribing = true;
+    try {
+      _gameweeksSub = _listenLogged<List<Gameweek>>(
+        owner: owner,
+        what: 'schedule feed',
+        make: make,
+        disposed: () => _disposed,
+        onData: (gws) {
+          if (_derived) _gameweeksSession[_sessionKey] = gws;
+          _gameweeks = gws;
+          _scheduleFromError = false;
+          _scheduleRetry.cancel();
+          _scheduleRetry.reset();
+          _syncWeeks();
+          _notify();
+        },
+        onError: () {
+          // Never cached; a schedule already showing stays. None yet: the
+          // gates open on an empty schedule marked UNKNOWN.
+          if (_gameweeks == null) {
+            _gameweeks = const [];
+            _scheduleFromError = true;
+          }
+          // The stream ends after an error: unless it answers again first,
+          // re-subscribe on the back-off.
+          if (_scheduleSubscribing) {
+            _scheduleRetry.cancel(); // could not even subscribe
+          } else {
+            _scheduleRetry.retry(() {
+              if (!identical(_scheduleMake, make)) return;
+              _gameweeksSub?.cancel();
+              _listenSchedule(make);
+            });
+          }
+          _syncWeeks();
+          _notify();
+        },
+      );
+    } finally {
+      _scheduleSubscribing = false;
+    }
   }
 
   void _syncWeeks() {
@@ -427,6 +619,29 @@ class FantasyLeagueGamesFeed {
   /// Only a REAL start hour (> 0): absent / failed is retried next visit.
   static final Map<String, int> _startHourSession = {};
 
+  /// Fresh reads (Task 4, survey list B): a newer `Start Time` (under a
+  /// sport/season) from the server drops that season's memoised hour, so the next
+  /// visit re-derives it. App lifetime; started by [start] (lazy static).
+  static final VoidCallback _startHourFollow =
+      FreshReads.onNewerUnder('', (path, _) {
+    final parts = path.split('/');
+    if (parts.length == 3 && parts[2] == 'Start Time') {
+      _startHourSession.remove('${parts[0]}|${parts[1]}');
+    }
+  });
+
+  /// Test seam: the key a newer Start Time at [path] drops, if memoised.
+  @visibleForTesting
+  static bool debugHasStartHour(String sport, String season) =>
+      _startHourSession.containsKey('$sport|$season');
+
+  /// Test seam: memoises an hour as a finished visit would.
+  @visibleForTesting
+  static void debugSetStartHour(String sport, String season, int hour) {
+    _startHourFollow;
+    _startHourSession['$sport|$season'] = hour;
+  }
+
   /// Clears the shared games caches (sign-out hygiene, tests).
   static void clearSessionCache() {
     _gamesSession.clear();
@@ -443,6 +658,8 @@ class FantasyLeagueGamesFeed {
   bool _gamesLoaded = false;
   bool _gamesHourKnown = false;
   bool _hourPending = false;
+  bool _hasGames = false; // real games ever loaded (here or session)
+  bool _failed = false;
   int? _hour; // the latest start hour read (0 = unknown)
 
   StreamSubscription<List<TournamentMatch>>? _gamesSub;
@@ -453,6 +670,29 @@ class FantasyLeagueGamesFeed {
   /// The games have landed (or failed) and no first-visit hour read is
   /// pending — joins the owner's reveal gate.
   bool get ready => _gamesLoaded && !_hourPending;
+
+  /// The latest games answer was an error and no games were ever loaded (in
+  /// this feed or the session cache): what the games are is UNKNOWN. Any
+  /// data clears it; an error after good games leaves it false.
+  bool get failed => _failed;
+
+  /// The fan's "Try again": clears [failed], goes back to not ready and
+  /// re-subscribes with the hour it has. A no-op when disposed.
+  void retry() {
+    if (_disposed || !_started) return;
+    _failed = false;
+    _gamesLoaded = _hasGames;
+    _gamesSub?.cancel();
+    _gamesSub = null;
+    final seam = gamesStates;
+    if (seam != null) {
+      _listenGames(() => seam,
+          hourKnown: () => _loadStartHour == null || (_hour ?? 0) > 0);
+    } else if (_hour != null) {
+      _applyHour(_hour!); // no hour yet: its arrival subscribes
+    }
+    _notify();
+  }
 
   /// Whether the games ON SCREEN were derived with a real start hour (fed
   /// games: whether the loaded hour is real). false → a derived time must be
@@ -472,6 +712,7 @@ class FantasyLeagueGamesFeed {
         _games = snap.games;
         _gamesHourKnown = snap.hourKnown;
         _gamesLoaded = true;
+        _hasGames = true;
       }
       final seam = gamesStates;
       if (seam != null) {
@@ -483,6 +724,7 @@ class FantasyLeagueGamesFeed {
         if (seam != null) _gamesHourKnown = true;
         return;
       }
+      _startHourFollow; // refill/drop on newer server values
       final cachedHour = _startHourSession[_sessionKey];
       if (cachedHour != null) {
         _applyHour(cachedHour);
@@ -547,28 +789,201 @@ class FantasyLeagueGamesFeed {
         _games = games;
         _gamesHourKnown = hourKnown();
         _gamesLoaded = true;
+        _hasGames = true;
+        _failed = false;
         _gamesSession[_sessionKey] = (games: games, hourKnown: _gamesHourKnown);
         _notify();
       },
       onError: () {
         _gamesLoaded = true; // the last good games stay
+        if (!_hasGames) _failed = true;
         _notify();
       },
     );
   }
 }
 
+/// The season's standings and crest map behind the Fantasy Hub's League tab —
+/// the `LeagueDetailPage._subscribeStandings` + `_loadDisplaySeeds` wiring in
+/// one feed. The crests ([watchSeasonLogos], never synchronous) report first
+/// and the standings subscribe WITH them, so crests never pop in after the
+/// rows; whenever the crests change the standings re-subscribe with the new
+/// map and the rows on screen stay until the new answer arrives.
+///   • [ready]: the logos have reported once AND the standings answered (data
+///     or error) — one reveal;
+///   • [failed]: the standings errored and none were ever loaded (here or in
+///     the session cache) — an error is not "no teams"; the last good rows
+///     stay after a later error;
+///   • session cache per `<sport>|<season>`: a revisit is ready at once.
+class FantasyLeagueTableFeed {
+  FantasyLeagueTableFeed({
+    required this.sport,
+    required this.season,
+    required this.owner,
+    required this.onChanged,
+    Stream<List<TournamentTeam>> Function(Map<String, String> logos)?
+        standingsFor,
+    VoidCallback Function(void Function(Map<String, String> logos) onLogos)?
+        watchLogos,
+  })  : _standingsFor = standingsFor,
+        _watchLogos = watchLogos;
+
+  final String sport;
+  final String season;
+  final String owner;
+  final VoidCallback onChanged;
+
+  /// Test seam replacing `LeagueService.watchStandings(sport, season, logos)`.
+  final Stream<List<TournamentTeam>> Function(Map<String, String> logos)?
+      _standingsFor;
+
+  /// Test seam replacing `watchSeasonLogos(sport, season, onLogos)`; returns
+  /// the stop function.
+  final VoidCallback Function(void Function(Map<String, String> logos) onLogos)?
+      _watchLogos;
+
+  static final Map<String,
+          ({List<TournamentTeam> standings, Map<String, String> logos})>
+      _session = {};
+
+  /// Clears the shared standings cache (sign-out hygiene, tests).
+  static void clearSessionCache() => _session.clear();
+
+  String get _sessionKey => '$sport|$season';
+
+  bool _started = false;
+  bool _starting = false;
+  bool _disposed = false;
+
+  List<TournamentTeam> _standings = const [];
+  Map<String, String> _logos = const {};
+  bool _logosLoaded = false;
+  bool _answered = false; // standings data or error since (re)start
+  bool _hasStandings = false;
+  bool _failed = false;
+
+  VoidCallback? _stopLogos;
+  StreamSubscription<List<TournamentTeam>>? _sub;
+
+  List<TournamentTeam> get standings => _standings;
+  Map<String, String> get logos => _logos;
+
+  /// The logos have reported once AND the standings answered or failed.
+  bool get ready => _logosLoaded && _answered;
+
+  /// The standings errored and none were ever loaded: UNKNOWN, not empty.
+  bool get failed => _failed;
+
+  /// Seeds from the session and starts watching. Never notifies
+  /// synchronously.
+  void start() {
+    if (_started || _disposed) return;
+    _started = true;
+    _starting = true;
+    try {
+      final snap = _session[_sessionKey];
+      if (snap != null) {
+        _standings = snap.standings;
+        _logos = snap.logos;
+        _logosLoaded = true;
+        _answered = true;
+        _hasStandings = true;
+      }
+      try {
+        _stopLogos = (_watchLogos ?? _defaultWatchLogos)(_onLogos);
+      } catch (e) {
+        _logFailure(owner, 'logos feed', e);
+        _onLogos(_logos); // no crests: the rows still show
+      }
+    } finally {
+      _starting = false;
+    }
+  }
+
+  VoidCallback _defaultWatchLogos(
+          void Function(Map<String, String> logos) onLogos) =>
+      watchSeasonLogos(sport, season, onLogos);
+
+  /// The fan's "Try again": clears [failed], back to not ready, re-subscribes.
+  /// A no-op when disposed.
+  void retry() {
+    if (_disposed || !_started) return;
+    _failed = false;
+    _answered = _hasStandings;
+    if (_logosLoaded) _subscribe();
+    _notify();
+  }
+
+  void dispose() {
+    _disposed = true;
+    _stopLogos?.call();
+    _stopLogos = null;
+    _sub?.cancel();
+    _sub = null;
+  }
+
+  void _notify() {
+    if (!_disposed && !_starting) onChanged();
+  }
+
+  void _onLogos(Map<String, String> logos) {
+    if (_disposed) return;
+    _logos = logos;
+    _logosLoaded = true;
+    _subscribe(); // re-map the rows with the crests; old rows stay meanwhile
+    _notify();
+  }
+
+  void _subscribe() {
+    _sub?.cancel();
+    _sub = null;
+    final logos = _logos;
+    _sub = _listenLogged<List<TournamentTeam>>(
+      owner: owner,
+      what: 'standings feed',
+      make: () =>
+          _standingsFor?.call(logos) ??
+          LeagueService.watchStandings(sport, season, logos),
+      disposed: () => _disposed,
+      onData: (rows) {
+        _standings = rows;
+        _hasStandings = true;
+        _answered = true;
+        _failed = false;
+        _session[_sessionKey] = (standings: rows, logos: logos);
+        _notify();
+      },
+      onError: () {
+        _answered = true; // the last good rows stay
+        if (!_hasStandings) _failed = true;
+        _notify();
+      },
+    );
+  }
+}
+
+/// The league season as the Finished flag says it is — three-way, because a
+/// failed read is not a fact (fix round 1, I2): [unknown] until a REAL
+/// answer (a live emission or the session cache) says running or over.
+enum FantasySeasonPhase { running, over, unknown }
+
 /// The league's own season-over flag (`/<sport>/<season>/Finished`) behind the
 /// screens that drop their price arrows once the season is over (the Players
 /// market, the player profile's stat strip, the Infinite profile's Fantasy
-/// tab). One wiring, one behaviour:
-///   • [ready] joins the owner's reveal gate — nothing paints the arrows
-///     before the flag has answered (no arrow flashing in then out);
+/// tab) and the entry points that word the season (home banner, Search hub
+/// card). One wiring, one behaviour:
+///   • [ready] joins the owner's reveal gate — nothing paints before the flag
+///     has answered or failed (no copy flashing in then out);
+///   • [phase] is the three-way answer; [finished] stays the simple "over"
+///     test for the arrow screens (unknown reads as not over there);
 ///   • an error (or a stream that cannot even be created — no Firebase app in
-///     a widget test) is logged with debugPrint and opens the gate: "not
-///     finished" unless an earlier real answer says otherwise (last good kept);
-///   • the last answer is session-cached per `<sport>|<season>`, so a revisit
-///     paints at once and the live stream then refreshes it in place.
+///     a widget test) is logged with debugPrint and opens the gate; the last
+///     good answer is kept, none = [FantasySeasonPhase.unknown];
+///   • a STREAM error re-subscribes on a bounded back-off (an RTDB onValue
+///     stream ends after an error), so one blip does not pin the answer for
+///     the session; a stream that cannot even be created is not retried;
+///   • only real answers are session-cached per `<sport>|<season>`, so a
+///     revisit paints at once and a failure never poisons the next open.
 class FantasySeasonFinishedFeed {
   FantasySeasonFinishedFeed({
     required this.sport,
@@ -586,6 +1001,10 @@ class FantasySeasonFinishedFeed {
   /// Test seam REPLACING `FantasyService.watchLeagueSeasonFinished`.
   final Stream<bool>? finishedStates;
 
+  /// Back-off between re-subscriptions after a stream error; the feed gives
+  /// up after the last one (the next screen open starts a fresh feed).
+  static const List<Duration> retryDelays = kFantasyFeedRetryDelays;
+
   /// The last answer per `<sport>|<season>` (written by every real emission).
   static final Map<String, bool> _session = {};
 
@@ -596,13 +1015,41 @@ class FantasySeasonFinishedFeed {
 
   bool _started = false;
   bool _starting = false;
+  bool _subscribing = false;
   bool _disposed = false;
   bool _finished = false;
+  bool _known = false;
   bool _loaded = false;
+  late final _Backoff _retry = _Backoff(() => _disposed);
   StreamSubscription<bool>? _sub;
 
-  /// The season is over (false until the flag says so).
+  /// Restarts the read by itself while the answer is unknown after a failure
+  /// (re-review 6b, item 2: foreground, connection back).
+  late final _AutoRecovery _recovery = _AutoRecovery(restart);
+
+  /// While the flag failed with no real answer: still retrying, or given up;
+  /// [FantasyFeedRetry.none] otherwise.
+  FantasyFeedRetry get retry {
+    if (_known || !_loaded) return FantasyFeedRetry.none;
+    return _retry.active ? FantasyFeedRetry.retrying : FantasyFeedRetry.gaveUp;
+  }
+
+  /// Reads again now with a fresh back-off (a no-op once a real answer is
+  /// known) — what the foreground / connection triggers call.
+  void restart() {
+    if (_disposed || !_started || _known) return;
+    _retry.startNow();
+    _subscribe();
+    _notify();
+  }
+
+  /// The season is over (false until a real answer says so).
   bool get finished => _finished;
+
+  /// running / over from a real answer; unknown while none has arrived.
+  FantasySeasonPhase get phase => !_known
+      ? FantasySeasonPhase.unknown
+      : (_finished ? FantasySeasonPhase.over : FantasySeasonPhase.running);
 
   /// The flag has answered (or failed) — joins the owner's reveal gate.
   bool get ready => _loaded;
@@ -617,8 +1064,20 @@ class FantasySeasonFinishedFeed {
       final seed = _session[_sessionKey];
       if (seed != null) {
         _finished = seed;
+        _known = true;
         _loaded = true;
       }
+      _subscribe();
+    } finally {
+      _starting = false;
+    }
+  }
+
+  void _subscribe() {
+    _sub?.cancel();
+    _sub = null;
+    _subscribing = true;
+    try {
       _sub = _listenLogged<bool>(
         owner: owner,
         what: 'season finished feed',
@@ -629,25 +1088,44 @@ class FantasySeasonFinishedFeed {
         onData: (finished) {
           _session[_sessionKey] = finished;
           _finished = finished;
+          _known = true;
           _loaded = true;
+          _retry.reset();
           _notify();
         },
         onError: () {
-          _loaded = true; // the last good answer stays; none = not finished
+          _loaded = true; // the last good answer stays; none = unknown
+          // A stream error ends the RTDB stream: drop it and try again
+          // later. A synchronous failure (no stream at all) is not retried.
+          if (_subscribing) {
+            _retry.cancel(); // could not even subscribe: nothing in flight
+          } else {
+            _sub?.cancel();
+            _sub = null;
+            _retry.retry(_subscribe);
+          }
           _notify();
         },
       );
     } finally {
-      _starting = false;
+      _subscribing = false;
     }
   }
 
   void dispose() {
     _disposed = true;
+    _retry.cancel();
+    _recovery.stop();
     _sub?.cancel();
   }
 
   void _notify() {
-    if (!_disposed && !_starting) onChanged();
+    if (_disposed) return;
+    if (!_known && _loaded) {
+      _recovery.start();
+    } else {
+      _recovery.stop();
+    }
+    if (!_starting) onChanged();
   }
 }

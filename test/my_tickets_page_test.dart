@@ -5,6 +5,8 @@
 // are created fresh per call because the page hands the thread page its own
 // stream.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -203,6 +205,70 @@ void main() {
       expect(find.byKey(const ValueKey('support_reply_field')), findsNothing);
       expect(find.byKey(const ValueKey('support_send_reply_button')),
           findsNothing);
+    });
+  });
+
+  group('errors are not spinners', () {
+    testWidgets('a failed ticket list says so (not an endless spinner)',
+        (tester) async {
+      await tester.pumpWidget(wrap(MyTicketsPage(
+        ticketNumsStream:
+            Stream<List<int>>.error(Exception('permission-denied')),
+        ticketStreamOf: (n) => Stream.value(_ticket(n)),
+        prefillUid: 'uid123',
+        prefillName: 'Zaya Arami',
+      )));
+      await tester.pump();
+      await tester.pump();
+      expect(
+          find.text("Couldn't load your tickets. Pull to refresh or try "
+              'again later.'),
+          findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      // Pulling to refresh must not crash.
+      await tester.fling(find.byType(ListView), const Offset(0, 300), 1000);
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('a ticket that no longer exists says so', (tester) async {
+      await tester.pumpWidget(wrap(TicketThreadPage(
+        num: 7,
+        ticketStream: Stream<SupportTicket?>.value(null),
+        prefillUid: 'uid123',
+        prefillName: 'Zaya Arami',
+      )));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('This ticket is no longer available.'), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+    });
+
+    testWidgets('a failed ticket read says so', (tester) async {
+      await tester.pumpWidget(wrap(TicketThreadPage(
+        num: 7,
+        ticketStream:
+            Stream<SupportTicket?>.error(Exception('permission-denied')),
+        prefillUid: 'uid123',
+        prefillName: 'Zaya Arami',
+      )));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text("Couldn't load this ticket. Try again later."),
+          findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+    });
+
+    testWidgets('while the ticket is still loading it shows the spinner',
+        (tester) async {
+      final pending = StreamController<SupportTicket?>();
+      addTearDown(pending.close);
+      await tester.pumpWidget(wrap(TicketThreadPage(
+        num: 7,
+        ticketStream: pending.stream,
+        prefillUid: 'uid123',
+        prefillName: 'Zaya Arami',
+      )));
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
     });
   });
 }

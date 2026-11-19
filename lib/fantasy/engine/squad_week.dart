@@ -17,6 +17,7 @@ class SlotResult {
     required this.multiplier,
     required this.autoSubbedIn,
     required this.played,
+    this.replacesId,
   });
   final String playerId;
   final FantasyPosition position;
@@ -26,6 +27,10 @@ class SlotResult {
   final int multiplier; // 1 normal, 2 captain, 3 triple captain
   final bool autoSubbedIn;
   final bool played;
+
+  /// Set only on a promoted (auto-subbed-in) bench slot: the absent starter
+  /// he covered. Null on every other slot.
+  final String? replacesId;
 }
 
 class SquadWeekResult {
@@ -44,14 +49,17 @@ SquadWeekResult scoreSquadWeek(
   // Auto-subs: each absent starter is covered by the first unused bench
   // player of the SAME position who played (spec §2). Covering bench scores
   // FULL; uncovered bench scores half (or full on Bench Boost).
-  final promoted = <String>{};
+  // promoted maps each covering bench player to the starter he covered
+  // (starters walked in pick order, so the FIRST absent starter of a
+  // position gets the first bench cover).
+  final promoted = <String, String>{};
   for (final starter in squad.starters) {
     if (of(starter.playerId).played) continue;
     for (final b in squad.bench) {
       if (b.position == starter.position &&
-          !promoted.contains(b.playerId) &&
+          !promoted.containsKey(b.playerId) &&
           of(b.playerId).played) {
-        promoted.add(b.playerId);
+        promoted[b.playerId] = starter.playerId;
         break;
       }
     }
@@ -77,7 +85,7 @@ SquadWeekResult scoreSquadWeek(
       counted = 0;
     } else if (!p.bench) {
       counted = w.points * mult * 10;
-    } else if (benchBoost || promoted.contains(p.playerId)) {
+    } else if (benchBoost || promoted.containsKey(p.playerId)) {
       counted = w.points * mult * 10;
     } else {
       counted = w.points * mult * cfg.benchFactorPercent ~/ 10;
@@ -89,8 +97,9 @@ SquadWeekResult scoreSquadWeek(
       rawPoints: w.points,
       countedTenths: counted,
       multiplier: p.playerId == armband && w.played ? capMult : 1,
-      autoSubbedIn: promoted.contains(p.playerId),
+      autoSubbedIn: promoted.containsKey(p.playerId),
       played: w.played,
+      replacesId: promoted[p.playerId],
     ));
   }
   return SquadWeekResult(slots);

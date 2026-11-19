@@ -13,6 +13,7 @@ const h = vi.hoisted(() => ({
   authDeleteError: null as unknown,
   authFailFor: [] as string[],
   providers: {} as Record<string, string>,
+  created: {} as Record<string, string>,
   getUserError: null as unknown,
   storageDeleted: [] as string[],
   lines: [] as string[],
@@ -65,7 +66,11 @@ vi.mock('firebase-admin/auth', () => ({
       if (h.getUserError !== null) throw h.getUserError;
       const id = h.providers[uid];
       if (id === undefined) throw Object.assign(new Error('gone'), { code: 'auth/user-not-found' });
-      return { providerData: [{ providerId: id }] };
+      const creationTime = h.created[uid];
+      return {
+        providerData: [{ providerId: id }],
+        metadata: creationTime === undefined ? {} : { creationTime },
+      };
     },
   }),
 }));
@@ -138,6 +143,7 @@ beforeEach(() => {
   h.authDeleteError = null;
   h.authFailFor = [];
   h.providers = { [ALICE]: 'google.com' };
+  h.created = {};
   h.getUserError = null;
   h.storageDeleted = [];
   h.lines = [];
@@ -162,6 +168,56 @@ describe('deleteAccount', () => {
     expect(h.tree.Users[ALICE]).toBeDefined();
     const missing = await failure(call(deleteAccount, {}, { uid: ALICE, token: {} }));
     expect(missing.details).toEqual({ code: 'recent-login-required' });
+  });
+
+  describe('a brand-new account that never finished its profile', () => {
+    const stale = () => ({ uid: ALICE, token: { auth_time: Math.floor(NOW / 1000) - 60 * 60 } });
+    const daysAgo = (d: number) => new Date(NOW - d * 24 * 60 * 60 * 1000).toUTCString();
+
+    it('may delete itself without a fresh sign-in (incomplete + 3 days old)', async () => {
+      h.created[ALICE] = daysAgo(3);
+      const result = await call(deleteAccount, {}, stale()) as Record<string, number>;
+      expect(result['deleted']).toBeGreaterThan(0);
+      expect(h.deletedAuth).toEqual([ALICE]);
+      expect(h.tree.Users[ALICE]).toBeUndefined();
+    });
+
+    it('a completed profile still needs a fresh sign-in', async () => {
+      h.created[ALICE] = daysAgo(3);
+      h.tree.Users[ALICE].ProfileCompleted = true;
+      const e = await failure(call(deleteAccount, {}, stale()));
+      expect(e.details).toEqual({ code: 'recent-login-required' });
+      expect(h.deletedAuth).toEqual([]);
+    });
+
+    it('a new incomplete KEPT account of a combine (MergedFrom) still needs a fresh sign-in', async () => {
+      h.created[ALICE] = daysAgo(3);
+      h.tree.Users[ALICE].MergedFrom = { uid_old_12345: true };
+      const e = await failure(call(deleteAccount, {}, stale()));
+      expect(e.details).toEqual({ code: 'recent-login-required' });
+      expect(h.deletedAuth).toEqual([]);
+      expect(h.tree.Users[ALICE]).toBeDefined();
+    });
+
+    it('an incomplete account older than 7 days still needs a fresh sign-in', async () => {
+      h.created[ALICE] = daysAgo(8);
+      const e = await failure(call(deleteAccount, {}, stale()));
+      expect(e.details).toEqual({ code: 'recent-login-required' });
+      expect(h.tree.Users[ALICE]).toBeDefined();
+    });
+
+    it('an Auth user that is already gone keeps the fresh sign-in rule', async () => {
+      delete h.providers[ALICE];
+      const e = await failure(call(deleteAccount, {}, stale()));
+      expect(e.details).toEqual({ code: 'recent-login-required' });
+    });
+
+    it('a fresh sign-in is unchanged (no Auth lookup needed)', async () => {
+      h.tree.Users[ALICE].ProfileCompleted = true;
+      h.getUserError = new Error('auth lookup should not be needed');
+      await call(deleteAccount, {}, fresh());
+      expect(h.deletedAuth).toEqual([ALICE]);
+    });
   });
 
   it('refuses the old account of a merge and names the kept hint', async () => {

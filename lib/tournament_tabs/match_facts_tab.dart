@@ -504,16 +504,13 @@ class MatchFactsTab extends StatelessWidget {
       return (a['_mergeIdx'] as int).compareTo(b['_mergeIdx'] as int);
     });
 
-    // L6: drop background-stat rows (basketball Miss; FF negatives later) for
-    // league games. Tournament (leagueSportKey == null) and futsal keep every
-    // event — the predicate returns false for them.
-    final sportKey = leagueSportKey;
-    final visibleEvents = sportKey == null
-        ? allEvents
-        : allEvents
-            .where((e) => !isHiddenLeagueTimelineActivity(
-                sportKey, e['eventType'] as String))
-            .toList();
+    // Drop rows that are not timeline material: saves and defense plays (all
+    // sports, league and tournament) and basketball Miss. They stay counted
+    // in box scores, stats and leaders; only the timeline hides them.
+    final visibleEvents = allEvents
+        .where((e) => !isHiddenTimelineActivity(
+            leagueSportKey, e['eventType'] as String))
+        .toList();
 
     // Teaser visibility: only when prediction context is fully provided and both
     // teams are confirmed — rendered at the very top of either code path.

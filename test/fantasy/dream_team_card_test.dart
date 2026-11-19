@@ -133,6 +133,58 @@ void main() {
     expect(opened, hasLength(3));
   });
 
+  // Release report #10: at phone width the name boxes of one row crowded
+  // into the photos of the row below. In the hub the card sits inside 12 px
+  // page padding, so the court is ~308 px wide at a 360 px screen.
+  for (final brightness in Brightness.values) {
+    testWidgets('360 px ($brightness): no row chip (photo + 2-line name '
+        'box + points) overlaps the next row', (tester) async {
+      tester.view.physicalSize = const Size(360, 1400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      // Two-line names everywhere: the tallest nameplates.
+      const gk = 'Anthony Memon Longname';
+      const defs = ['Demsin Bet varda', 'Pedro Siva Longname'];
+      const atts = ['Eli Derazizyan Long', 'Bruno Siva Longname'];
+      final teams = dreamTeamsFromNode({
+        '12': {
+          'Players': [
+            {'name': gk, 'position': 'GK', 'points': -2},
+            for (final n in defs) {'name': n, 'position': 'DEF', 'points': 16},
+            for (final n in atts) {'name': n, 'position': 'ATT', 'points': 11},
+          ],
+        },
+      });
+      await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(useMaterial3: true, brightness: brightness),
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: DreamTeamCard(
+                teams: teams,
+                config: FantasyConfig.futsalDefault(),
+                players: const [],
+              ),
+            ),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      Rect chip(String n) =>
+          tester.getRect(find.byKey(ValueKey('squad_chip_$n')));
+      for (final d in defs) {
+        expect(chip(gk).bottom, lessThanOrEqualTo(chip(d).top),
+            reason: 'GK name box runs into $d');
+        for (final a in atts) {
+          expect(chip(d).bottom, lessThanOrEqualTo(chip(a).top),
+              reason: '$d name box runs into $a');
+        }
+      }
+    });
+  }
+
   // Opus audit item 7: 360 px in light AND dark.
   for (final brightness in Brightness.values) {
     testWidgets('360 px: long names, twelve week chips and the share button '

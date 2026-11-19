@@ -1,6 +1,7 @@
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:infinite_sports_flutter/misc/follow_store.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 import 'package:infinite_sports_flutter/misc/notification_topics.dart';
 
 /// Notification categories a user can favorite. Mirrors the event categories
@@ -66,25 +67,32 @@ class NotificationPrefs {
     return result;
   }
 
-  /// The categories recorded server-side for [uid] (source of truth for
-  /// whether the one-time onboarding prompt still needs to show).
-  Future<Set<String>?> serverFavorites(String uid) async {
-    try {
-      final snap = (await FirebaseDatabase.instance
-              .ref('Users/$uid/FavoriteSports')
-              .once())
-          .snapshot;
-      if (snap.value is Map) {
-        return (snap.value as Map)
-            .entries
-            .where((e) => e.value == true)
-            .map((e) => e.key.toString())
-            .toSet();
+  /// Whether [uid] already answered the one-time favorites prompt (fresh
+  /// reads, Task 3 — replaces the old one-shot `hasAnswered` +
+  /// `serverFavorites` pair): true when `FavoriteSportsAnswered` is true or
+  /// any `FavoriteSports` node exists (even empty = skipped) — trusted from
+  /// ANY source, so a fan who answered is never asked again; false only when
+  /// the server confirmed both are missing; null when that could not be
+  /// confirmed (saved copy or failed read) — no prompt this launch, asked
+  /// again next launch. Both reads run together, server-first.
+  Future<bool?> favoritesAnswered(String uid) async {
+    Future<FreshValue> read(String path) async {
+      try {
+        return await serverFirstValue(path);
+      } catch (_) {
+        return const FreshValue(null, fromServer: false);
       }
-      // Node exists but empty (user skipped) still counts as "answered".
-      if (snap.exists) return <String>{};
-    } catch (_) {}
-    return null; // null = never answered → prompt eligible
+    }
+
+    final reads = await Future.wait([
+      read('Users/$uid/FavoriteSportsAnswered'),
+      read('Users/$uid/FavoriteSports'),
+    ]);
+    final answered = reads[0];
+    final favorites = reads[1];
+    if (answered.value == true || favorites.value != null) return true;
+    if (answered.fromServer && favorites.fromServer) return false;
+    return null;
   }
 
   /// Marks onboarding answered even when the user picks nothing, so the
@@ -95,18 +103,6 @@ class NotificationPrefs {
           .ref('Users/$uid/FavoriteSportsAnswered')
           .set(true);
     } catch (_) {}
-  }
-
-  Future<bool> hasAnswered(String uid) async {
-    try {
-      final snap = (await FirebaseDatabase.instance
-              .ref('Users/$uid/FavoriteSportsAnswered')
-              .once())
-          .snapshot;
-      return snap.value == true;
-    } catch (_) {
-      return false;
-    }
   }
 
   /// Whether the device is subscribed to an event's reminder topic.

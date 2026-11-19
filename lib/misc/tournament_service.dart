@@ -1,5 +1,5 @@
 import 'package:firebase_database/firebase_database.dart';
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show VoidCallback, debugPrint;
 import 'package:infinite_sports_flutter/model/leaderboard_entry.dart';
 import 'package:infinite_sports_flutter/model/prediction.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
@@ -9,8 +9,11 @@ import 'package:infinite_sports_flutter/model/tournament_stage.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
+import 'package:infinite_sports_flutter/misc/public_profiles.dart' show followProfileUrlCache;
 
-/// ONE-SHOT READS UNDER /Tournaments USE once(), NEVER get() (iOS bug):
+/// ONE-SHOT READS UNDER /Tournaments USE refreshingOnce (lib/misc/
+/// fresh_read.dart — an onValue listener, like once()), NEVER get() (iOS bug):
 /// FrontPage keeps a PERMANENT onValue listener on the whole /Tournaments
 /// node ([TournamentService.watchAllTournaments], for live tournament-tab
 /// discovery), and firebase-ios-sdk's one-shot get() returns the WRONG NODE
@@ -25,6 +28,13 @@ class TournamentService {
   /// Session-scoped cache of /Users/{uid}/ProfileUrl values.
   /// Keyed by uid. Cleared by [clearProfileUrlCache] if needed.
   static final Map<String, String> _profileUrlCache = {};
+
+  /// Refilled from newer server values (fresh reads, Task 4); app lifetime.
+  static final VoidCallback _profileUrlFollow =
+      followProfileUrlCache(_profileUrlCache);
+
+  /// Starts [_profileUrlFollow] (Dart statics are lazy).
+  static void _ensureProfileUrlFollow() => _profileUrlFollow;
 
   /// Clears the in-memory ProfileUrl cache. Call after a sign-out or when
   /// you need fresh user photos (rare).
@@ -60,7 +70,7 @@ class TournamentService {
   static Future<List<Tournament>> getAllTournaments() async {
     try {
       DatabaseReference ref = FirebaseDatabase.instance.ref('/Tournaments');
-      final event = await ref.once();
+      final event = await refreshingOnce(ref);
       return parseTournaments(event.snapshot.value);
     } catch (_) {
       return [];
@@ -94,7 +104,7 @@ class TournamentService {
   static Future<String?> getCurrentTournamentId() async {
     try {
       DatabaseReference ref = FirebaseDatabase.instance.ref('/Tournaments');
-      final event = await ref.child('Current Tournament').once();
+      final event = await refreshingOnce(ref.child('Current Tournament'));
       final value = event.snapshot.value;
       if (value == null) return null;
       return value.toString();
@@ -115,7 +125,7 @@ class TournamentService {
     try {
       DatabaseReference ref =
           FirebaseDatabase.instance.ref('/Tournaments/$tournamentId');
-      final event = await ref.once();
+      final event = await refreshingOnce(ref);
       final value = event.snapshot.value;
       if (value == null) return null;
       final data = value as Map;
@@ -190,9 +200,8 @@ class TournamentService {
   static Future<TournamentBundle> getTournamentBundle(
       String tournamentId) async {
     try {
-      final event = await FirebaseDatabase.instance
-          .ref('/Tournaments/$tournamentId')
-          .once();
+      final event = await refreshingOnce(FirebaseDatabase.instance
+          .ref('/Tournaments/$tournamentId'));
       return parseTournamentBundle(tournamentId, event.snapshot.value) ??
           TournamentBundle.empty();
     } catch (e) {
@@ -246,8 +255,8 @@ class TournamentService {
     try {
       final ref = FirebaseDatabase.instance.ref('/Tournaments/$tournamentId');
       final events = await Future.wait([
-        ref.child('Teams').once(),
-        ref.child('Table').once(),
+        refreshingOnce(ref.child('Teams')),
+        refreshingOnce(ref.child('Table')),
       ]);
       return parseTeams(events[0].snapshot.value, events[1].snapshot.value);
     } catch (e) {
@@ -281,7 +290,7 @@ class TournamentService {
     try {
       DatabaseReference ref =
           FirebaseDatabase.instance.ref('/Tournaments/$tournamentId/Matches');
-      final event = await ref.once();
+      final event = await refreshingOnce(ref);
       return parseMatches(event.snapshot.value);
     } catch (e) {
       debugPrint('TournamentService.getMatches error: $e');
@@ -348,9 +357,8 @@ class TournamentService {
   /// Future.wait wave as the teams fetch its parsing depends on.
   static Future<Object?> getRostersNode(String tournamentId) async {
     try {
-      final event = await FirebaseDatabase.instance
-          .ref('/Tournaments/$tournamentId/Rosters')
-          .once();
+      final event = await refreshingOnce(FirebaseDatabase.instance
+          .ref('/Tournaments/$tournamentId/Rosters'));
       return event.snapshot.value;
     } catch (e) {
       debugPrint('TournamentService.getRostersNode error: $e');
@@ -407,13 +415,13 @@ class TournamentService {
         }
       }
     }
+    _ensureProfileUrlFollow();
     if (uidsToFetch.isNotEmpty) {
       await Future.wait(uidsToFetch.map((uid) async {
         try {
           // Lockdown B1: other-user photos come from the public mirror.
-          final urlSnap = (await FirebaseDatabase.instance
-                  .ref('/PublicProfiles/$uid/ProfileUrl')
-                  .once())
+          final urlSnap = (await refreshingOnce(FirebaseDatabase.instance
+                  .ref('/PublicProfiles/$uid/ProfileUrl')))
               .snapshot;
           _profileUrlCache[uid] = urlSnap.value?.toString() ?? '';
         } catch (_) {
@@ -480,7 +488,7 @@ class TournamentService {
   static Future<List<Map<String, dynamic>>> getH2HMatches(String team1Id, String team2Id) async {
     try {
       final ref = FirebaseDatabase.instance.ref('/Tournaments');
-      final event = await ref.once();
+      final event = await refreshingOnce(ref);
       final value = event.snapshot.value;
       if (value == null) return [];
       final data = value as Map;
@@ -524,9 +532,8 @@ class TournamentService {
   /// Reads PredictionConfig once (defaults applied when absent).
   static Future<PredictionConfig> getPredictionConfig(String tournamentId) async {
     try {
-      final event = await FirebaseDatabase.instance
-          .ref('/Tournaments/$tournamentId/PredictionConfig')
-          .once();
+      final event = await refreshingOnce(FirebaseDatabase.instance
+          .ref('/Tournaments/$tournamentId/PredictionConfig'));
       return PredictionConfig.fromFirebase(event.snapshot.value);
     } catch (e) {
       debugPrint('TournamentService.getPredictionConfig error: $e');
@@ -667,7 +674,7 @@ class TournamentService {
   static Future<List<Map<String, dynamic>>> getTeamTournamentHistory(String teamId) async {
     try {
       final ref = FirebaseDatabase.instance.ref('/Tournaments');
-      final event = await ref.once();
+      final event = await refreshingOnce(ref);
       final value = event.snapshot.value;
       if (value == null) return [];
       final data = value as Map;

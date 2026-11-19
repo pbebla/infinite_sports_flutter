@@ -63,6 +63,29 @@ import 'package:infinite_sports_flutter/fantasy/hub/live_logic.dart'
 import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 
+/// The season-over call to action, shared by this banner ("Season over —
+/// see the final standings") and the Search hub's Fantasy card.
+const String kFantasySeasonOverCta = 'see the final standings';
+
+/// The neutral line for a season whose state could not be read (fix round
+/// 1, I2 — a failed read is not a fact): claims neither "live" nor "over".
+String fantasySeasonNeutralLine(String sport, String season) =>
+    '$sport Season $season · Open Infinite Fantasy';
+
+/// The Search hub's Fantasy card line (release report #16, fix round 1 I2):
+/// "is live" only while the league season is RUNNING and "is over" only once
+/// it is OVER — both read from the SAME [FantasySeasonFinishedFeed.phase]
+/// this banner uses — and the neutral line while that is unknown.
+String fantasyEntryCardSubtitle(
+        String sport, String season, FantasySeasonPhase phase) =>
+    switch (phase) {
+      FantasySeasonPhase.over =>
+        '$sport Season $season is over — $kFantasySeasonOverCta',
+      FantasySeasonPhase.running =>
+        'Pick your seven — $sport Season $season is live',
+      FantasySeasonPhase.unknown => fantasySeasonNeutralLine(sport, season),
+    };
+
 class FantasyHomeBanner extends StatefulWidget {
   const FantasyHomeBanner({
     super.key,
@@ -373,15 +396,25 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
   /// the squad can't be saved.
   String _restingTitle() {
     if (_seasonFinished.finished) {
-      return 'Season over — see the final standings';
+      return 'Season over — $kFantasySeasonOverCta';
     }
-    const setYourSquad = 'Fantasy is live — set your squad';
+    // "Fantasy is live" only when the league flag SAYS the season is
+    // running; a failed read gets the neutral line (fix round 1, I2).
+    final setYourSquad =
+        _seasonFinished.phase == FantasySeasonPhase.running
+            ? 'Fantasy is live — set your squad'
+            : fantasySeasonNeutralLine(widget.sport, widget.season);
     switch (_config?.lockOverride ?? FantasyLockOverride.auto) {
       case FantasyLockOverride.open:
         return setYourSquad;
       case FantasyLockOverride.locked:
         return 'Squads locked by the league';
       case FantasyLockOverride.auto:
+        // The schedule failed to load: whether saving is open is unknown —
+        // the neutral line, never "set your squad" (review 6, I2).
+        if (_schedule.scheduleUnknown) {
+          return fantasySeasonNeutralLine(widget.sport, widget.season);
+        }
         final gw = _lockedGameweek();
         if (gw == null) return setYourSquad;
         // Hour 24 = the midnight that ends match day, league time.

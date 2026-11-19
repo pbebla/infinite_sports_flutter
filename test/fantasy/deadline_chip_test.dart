@@ -244,4 +244,81 @@ void main() {
       await teardown(tester);
     });
   });
+
+  // Release report #8: the hub header collapses to a slim one-line bar that
+  // keeps the deadline visible. ONE clock drives both faces (no second
+  // timer), and the slim line reads the same face logic as the chip.
+  group('slim face (collapsed hub header)', () {
+    final lock = DateTime.utc(2026, 7, 5, 22); // GW1 lock
+
+    test('counting: "GW1 locks in" + a D HH:MM:SS countdown', () {
+      final f = deadlineSlimFace(gameweeks, FantasyLockOverride.auto,
+          lock.subtract(const Duration(days: 2, hours: 3, minutes: 4, seconds: 5)));
+      expect(f.label, 'GW1 locks in');
+      expect(f.countdown, '2d 03:04:05');
+      expect(f.icon, Icons.timer_outlined);
+    });
+
+    test('under a day: HH:MM:SS, no day part', () {
+      final f = deadlineSlimFace(gameweeks, FantasyLockOverride.auto,
+          lock.subtract(const Duration(minutes: 7, seconds: 1)));
+      expect(f.countdown, '00:07:01');
+    });
+
+    test('league override open: the GW label + "Editing open"', () {
+      final f = deadlineSlimFace(gameweeks, FantasyLockOverride.open,
+          DateTime.utc(2026, 7, 3, 12));
+      expect(f.label, 'GW1 · Editing open');
+      expect(f.countdown, isNull);
+      expect(f.icon, Icons.lock_open);
+    });
+
+    test('league override locked / locked week / season over', () {
+      expect(
+          deadlineSlimFace(gameweeks, FantasyLockOverride.locked,
+                  DateTime.utc(2026, 7, 3, 12))
+              .label,
+          'GW1 · Locked by the league');
+      expect(
+          deadlineSlimFace(gameweeks, FantasyLockOverride.auto,
+                  DateTime.utc(2026, 7, 5, 23))
+              .label,
+          'GW1 locked');
+      expect(
+          deadlineSlimFace(gameweeks, FantasyLockOverride.auto,
+                  DateTime.utc(2026, 8, 1))
+              .label,
+          'Season complete');
+    });
+
+    testWidgets('one shared clock ticks the big countdown AND the slim line',
+        (tester) async {
+      var now = lock.subtract(const Duration(seconds: 10));
+      final clock = FantasyDeadlineClock(nowUtc: () => now);
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Column(children: [
+            FantasyDeadlineCountdown(
+              gameweeks: gameweeks,
+              lockOverride: FantasyLockOverride.auto,
+              clock: clock,
+            ),
+            FantasyDeadlineSlimLine(
+              gameweeks: gameweeks,
+              lockOverride: FantasyLockOverride.auto,
+              clock: clock,
+            ),
+          ]),
+        ),
+      ));
+      expect(find.text('10'), findsOneWidget); // the Sec box
+      expect(find.text('00:00:10'), findsOneWidget); // the slim line
+      now = lock.subtract(const Duration(seconds: 9));
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('09'), findsOneWidget);
+      expect(find.text('00:00:09'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      clock.dispose(); // cancels the one timer
+    });
+  });
 }

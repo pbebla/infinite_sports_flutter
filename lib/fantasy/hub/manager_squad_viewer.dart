@@ -72,6 +72,7 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/auto_sub_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/badge_shelf.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
@@ -538,6 +539,8 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
   /// on your own "Now" face, the week being played — but only when "Now" IS
   /// the squad that was locked for it (same picks): the live points belong to
   /// that squad and are never drawn on a different one. null = no points.
+  /// "Same" means the same players on the same side of the bench line: a
+  /// Substitute keeps the players but changes the lineup (final review M1).
   int? _pointsWeek(Map<int, FantasySquad> weeks) {
     final picked = _selectedWeek;
     if (picked != null) return picked;
@@ -547,10 +550,13 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
     final locked = weeks[live];
     final now = _liveSquad;
     if (locked == null || now == null) return null;
-    Set<String> ids(FantasySquad s) => {for (final p in s.picks) p.playerId};
-    final a = ids(now);
-    final b = ids(locked);
-    return a.length == b.length && a.containsAll(b) ? live : null;
+    Map<String, bool> benchOf(FantasySquad s) =>
+        {for (final p in s.picks) p.playerId: p.bench};
+    final a = benchOf(now);
+    final b = benchOf(locked);
+    final same = a.length == b.length &&
+        b.entries.every((e) => a.containsKey(e.key) && a[e.key] == e.value);
+    return same ? live : null;
   }
 
   /// [week]'s points, through My Team's own resolver — null while the Voided
@@ -682,6 +688,10 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
         if (p.photoUrl != null) p.name: p.photoUrl,
     };
     final slots = buildSlots(widget.config);
+    // The week's auto-subs (display only), from the points model's rows —
+    // the same rule as My Team's locked court (auto_sub_view).
+    final autoSubs = autoSubDisplay(
+        slots, picksToSlots(squad, slots), points?.rows ?? const []);
     final chip = chipLabel(squad?.chip);
 
     return SingleChildScrollView(
@@ -753,13 +763,17 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
             FantasyCourtView(
               config: widget.config,
               slots: slots,
-              slotPicks: picksToSlots(squad, slots),
+              slotPicks: autoSubs.slotPicks,
               captainId: squad.captainId,
               viceId: squad.viceId,
               // The real armband: ×3 on a Triple Captain week.
               captainMultiplier: captainMultiplierFor(squad, widget.config),
               // Each player's counted points for the week shown.
-              weekPointsFor: points?.chipTextFor,
+              // A starter an auto-sub replaced reads Out.
+              weekPointsFor:
+                  subbedOutChipText(points?.chipTextFor, autoSubs.subbedOut),
+              subbedIn: autoSubs.subbedIn,
+              subbedOut: autoSubs.subbedOut,
               onSlotTap: null,
               onPlayerTap: widget.onOpenPlayer,
               photoUrlFor: (id) => photoByName[id],

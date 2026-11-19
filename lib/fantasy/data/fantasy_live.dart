@@ -605,8 +605,12 @@ Stream<R> joinWithLive<A, R>(
     onCancel: () {
       bound?.cancel();
       bound = null;
-      unawaited(officialSub?.cancel());
-      unawaited(liveSub?.cancel());
+      // A source cancelled mid-failure (an async* generator that throws as
+      // it is cancelled) completes its cancel future with that error: it is
+      // already reported through onError, so never let it escape uncaught
+      // (review 6, M-b — kept-alive tabs now cancel and re-listen).
+      unawaited(officialSub?.cancel().catchError((Object _) {}));
+      unawaited(liveSub?.cancel().catchError((Object _) {}));
     },
   );
   return controller.stream;

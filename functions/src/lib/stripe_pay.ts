@@ -26,6 +26,8 @@ export interface SubmissionLike {
 /** The subset of RegTeam fields the payment math needs. */
 export interface TeamLike {
   codeWaivesPayment: boolean;
+  /** The team's captain (Teams/<id>/CaptainUid); only the no-charge stamp reads it. */
+  captainUid?: string;
 }
 
 /** Dollars -> integer cents, rounded to the nearest cent (Stripe requires
@@ -59,7 +61,8 @@ export function isAlreadyPaid(submission: SubmissionLike): boolean {
  *  - captain -> the flat team fee, only under 'teamFee' or 'both'
  *  - individual (or any other/legacy path) -> the per-player fee, only
  *    under 'perPlayer' or 'both'
- * [team] is omitted for individual/captain paths; a joiner with no [team]
+ * [team] only matters for the joiner path (individual and captain ignore
+ * it, even when passed); a joiner with no [team]
  * defensively owes the full per-player fee (fail closed, never accidentally
  * free).
  */

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:infinite_sports_flutter/misc/event_utils.dart';
 import 'package:infinite_sports_flutter/misc/parse_helpers.dart';
+import 'package:infinite_sports_flutter/misc/season_pointers.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 
 /// League sports that follow the "Current League" shape (a `<Sport> Season`
@@ -137,15 +138,28 @@ Stream<Map<DateTime, List<CalendarEntry>>> watchTournamentDays() {
 
 /// Live match days across EVERY league sport's current season
 /// ([kLeagueSports]), merged into one map. Each sport's `<Sport> Season`
-/// pointer is read once at subscribe time (same as the old single-sport
-/// version), then its `<Sport>/<Season>/Date` node is streamed live; the
-/// per-sport maps are merged (via [mergeDayMaps]) and re-emitted whenever
-/// any one of them changes. Follows the same manual stream-merge pattern as
-/// [watchAllEvents] in event_repo.dart.
-Stream<Map<DateTime, List<CalendarEntry>>> watchLeagueDays() {
+/// pointer comes from the live season pointers (season_pointers.dart) and
+/// its `<Sport>/<Season>/Date` node is streamed live; the per-sport maps are
+/// merged (via [mergeDayMaps]) and re-emitted whenever any one of them
+/// changes. When a season pointer moves (Season 15 → 16) that sport's old
+/// Date stream is cancelled and the new one replaces its days in ONE update
+/// (the old days stay until the new season's first answer — no empty flash).
+/// A sport whose pointer cannot be read is left out until the pointer
+/// answers. Follows the same manual stream-merge pattern as [watchAllEvents]
+/// in event_repo.dart. [dateNode] is a test seam (path → raw node values).
+Stream<Map<DateTime, List<CalendarEntry>>> watchLeagueDays({
+  Stream<Object?> Function(String path)? dateNode,
+}) {
   final controller = StreamController<Map<DateTime, List<CalendarEntry>>>();
   final perSport = <String, Map<DateTime, List<CalendarEntry>>>{};
-  final subs = <StreamSubscription>[];
+  final shownSeason = <String, String>{};
+  final followed = <String, String>{};
+  final subs = <String, StreamSubscription>{};
+  final open = dateNode ??
+      (String path) => FirebaseDatabase.instance
+          .ref(path)
+          .onValue
+          .map((e) => e.snapshot.value);
   var cancelled = false;
   var emitted = false;
 
@@ -154,35 +168,58 @@ Stream<Map<DateTime, List<CalendarEntry>>> watchLeagueDays() {
     if (!controller.isClosed) controller.add(mergeDayMaps(perSport.values));
   }
 
-  Future<void> watchSport(String sport) async {
-    String season;
-    try {
-      season = await getCurrentSeason(sport);
-    } catch (_) {
-      return;
-    }
-    if (cancelled) return;
-    subs.add(FirebaseDatabase.instance
-        .ref('$sport/$season/Date')
-        .onValue
-        .map((e) => leagueDaysFrom(sport, season, e.snapshot.value))
+  void follow(String sport, String? season) {
+    if (cancelled || season == null || followed[sport] == season) return;
+    followed[sport] = season;
+    subs.remove(sport)?.cancel();
+    subs[sport] = open('$sport/$season/Date')
+        .map((v) => leagueDaysFrom(sport, season, v))
         .listen((byDay) {
       perSport[sport] = byDay;
+      shownSeason[sport] = season;
       emit();
     }, onError: (_) {
-      if (!emitted) emit();
-    }));
+      // A failed read is not "no games": an older season's days are dropped
+      // (they are no longer the current ones), otherwise the gate opens.
+      if (shownSeason.containsKey(sport) && shownSeason[sport] != season) {
+        perSport.remove(sport);
+        shownSeason.remove(sport);
+        emit();
+      } else if (!emitted) {
+        emit();
+      }
+    });
+  }
+
+  Future<void> watchSport(String sport) async {
+    String? season;
+    try {
+      season = await SeasonPointers.read(seasonPointerPath(sport));
+    } catch (_) {
+      return; // followed when the pointer answers (onPointers)
+    }
+    follow(sport, season);
+  }
+
+  void onPointers() {
+    final now = SeasonPointers.listenable.value;
+    for (final sport in kLeagueSports) {
+      follow(sport, now.seasonFor(sport));
+    }
   }
 
   for (final sport in kLeagueSports) {
     watchSport(sport);
   }
+  SeasonPointers.listenable.addListener(onPointers);
 
   controller.onCancel = () {
     cancelled = true;
-    for (final s in subs) {
+    SeasonPointers.listenable.removeListener(onPointers);
+    for (final s in subs.values) {
       s.cancel();
     }
+    subs.clear();
   };
   return controller.stream;
 }

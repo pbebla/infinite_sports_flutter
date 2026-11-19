@@ -39,6 +39,8 @@ class FantasyMyTeamTab extends StatelessWidget {
     required this.configState,
     required this.players,
     required this.gameweeks,
+    this.scheduleUnknown = false,
+    this.onRetrySchedule,
     required this.squadStates,
     this.initialSquad,
     required this.onSaveSquad,
@@ -108,6 +110,13 @@ class FantasyMyTeamTab extends StatelessWidget {
   final List<FantasyPlayer> players;
   final List<Gameweek> gameweeks;
 
+  /// The schedule read failed (FantasyScheduleFeed.scheduleUnknown, review 6
+  /// I2): never "Locked" / "Season complete" from that empty list.
+  final bool scheduleUnknown;
+
+  /// Non-null once the schedule feed has given up: "Try again".
+  final VoidCallback? onRetrySchedule;
+
   /// Re-listen-safe squad stream (hub broadcast of watchMySquad) + its
   /// latest value, so a tab remount paints without waiting for an emit.
   final Stream<FantasySquad?> squadStates;
@@ -170,6 +179,8 @@ class FantasyMyTeamTab extends StatelessWidget {
           config: configState.config,
           lockOverride: configState.lockOverride,
           gameweeks: gameweeks,
+          scheduleUnknown: scheduleUnknown,
+          onRetrySchedule: onRetrySchedule,
           players: players,
           squadStates: squadStates,
           initialSquad: initialSquad,

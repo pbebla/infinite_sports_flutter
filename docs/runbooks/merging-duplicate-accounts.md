@@ -24,19 +24,23 @@ This batch is 11 people:
 
 ## The order rule: merge first
 
+> **Update 2026-11-13.** The Season 15 fantasy test data was removed completely on the owner's instruction. Its fantasy settings went too, so Season 15 is no longer a fantasy season at all; only its player price list is kept. Job 1 below is therefore done, and it did **not** lock Parlevino out: a fresh dry run on 2026-11-13 still plans all 11 people with the same plan code. The tool only refuses a roster move in a season whose fantasy settings exist without the test marker, and Season 15 now has no fantasy settings.
+>
+> **What still applies:** run the merge, and finish the step 4 phone check, BEFORE jobs 2 and 3, and before the Season 15 fantasy settings are put back for the Season 16 fantasy start (the steps are in `functions/tools/rehearsal_out/s16_prices/READ_ME_FIRST.md`, a local file). Once those settings are back, the tool refuses Parlevino and refuses an undo.
+
 > **Run the merge (step 3, the apply) BEFORE any of these three Season 16 jobs:**
 >
-> 1. Clearing the Season 15 test fantasy data (`npm run fill:s15 -- --clear ...`).
+> 1. Clearing the Season 15 test fantasy data. **Done on 2026-11-13 (see the update above).** The old `npm run fill:s15 -- --clear ...` command no longer applies and refuses to run.
 > 2. Applying the Season 16 player prices.
 > 3. Building Season 16 rosters from sign-ups.
 >
 > **The check before you start any of the three:** run a fresh dry run (the plain `npm run merge:accounts` from step 2) and look for Parlevino Tamraz's line. It must say `Parlevino Tamraz: already merged - nothing to do`. If he is refused, or his line is missing, stop and tell Claude. Do not put the test data back.
 >
-> **Why:** Parlevino's Season 15 move is only allowed while the Season 15 test data is still there. If the test data was cleared first, the tool **refuses him** (the whole person, not just that season) and writes nothing for him.
+> **Why:** Parlevino's Season 15 move is only allowed while Season 15 is not a live fantasy season: either it has no fantasy settings at all (true since 2026-11-13) or its test marker is still there. If Season 15 has fantasy settings and no test marker, the tool **refuses him** (the whole person, not just that season) and writes nothing for him.
 >
 > **Two more things that follow from it:**
 >
-> - **Do the step 4 phone check BEFORE clearing the Season 15 test data.** The tool can only undo the merge while that test data is still there. After it has been cleared, an undo is refused (see "Undo this step" in step 3) and you tell Claude.
+> - **Do the step 4 phone check BEFORE the Season 15 fantasy settings are put back for the Season 16 start.** The tool can only undo the merge while Season 15 is not a live fantasy season. After its settings are back, an undo is refused (see "Undo this step" in step 3) and you tell Claude.
 > - **This order rule wins over waiting for the app updates.** If the Season 16 deadline needs the merge now, apply early, without waiting for the app updates. The step 5 email still reaches the people who don't have the app update yet.
 
 Only step 3 (the apply) has to come first. The notices and the login switch (steps 5 and 6) can go on their own schedule. Step 7 is the Season 16 order in full.
@@ -115,7 +119,7 @@ It reads the live data, prints what it would do, and writes nothing. Read the pr
 - `refusals: none`.
 - `clusters: 11 in the map - 11 planned, 0 refused, 0 with nothing to do`. In the tool's words a "cluster" is one person.
 - `writes: 115 (...)`. On 2026-11-08 this was 20 seasons-played entries, 2 profile photo links, 24 roster relinks, 17 sign-up copies, 17 sign-up removes (the sign-up records moving), 33 merge stamps (11 old accounts, 3 stamps each), 1 first-name fix and 1 information field (Parlevino's Age, copied to his kept account).
-- A **plan code** (the tool calls it the plan digest): `plan digest (MergedAt time excluded): ...`. The latest dry run (2026-11-10, read-only) printed **`48135c9b50e5e401`** for these 11 people (0 refused, 126 changes, including one "combined from" link per old account so that deleting the kept account later also deletes the old ones). The code changes if the data or the list changes, so always use the one your latest dry run prints. A code from an older run (for example `bd98b0592255a300` from before the combined-from link, or from when the list had 10 people) is refused.
+- A **plan code** (the tool calls it the plan digest): `plan digest (MergedAt time excluded): ...`. The latest dry run (2026-11-13, read-only, after the Season 15 fantasy clean-up) printed **`48135c9b50e5e401`** for these 11 people (0 refused, 126 changes, including one "combined from" link per old account so that deleting the kept account later also deletes the old ones). The code changes if the data or the list changes, so always use the one your latest dry run prints. A code from an older run (for example `bd98b0592255a300` from before the combined-from link, or from when the list had 10 people) is refused.
 - The last line starts with "To apply exactly this plan:" and then gives the apply command, already filled in with the right plan code. In step 3 you copy only the `npm run ...` part after the colon.
 
 If the dry run shows a refusal, a different count than you expect, or an error: stop and send the printout to Claude. Don't go on.
@@ -153,7 +157,7 @@ If something goes wrong:
 - **`Refusing --apply: the plan digest is ... not the ... you expected`.** The data changed since your dry run (for example the Season 15 test data was cleared, which changes Parlevino's part of the plan). Nothing was written. Run the dry run again, read it, and use the new code. If the new dry run lists Parlevino under `refusals`, stop and tell Claude.
 - **A boxed `WARNING: THE MIRROR CHECK (CANARY) IS SKIPPED`.** Expected only when you re-run after a partly finished apply. On a first run, tell Claude.
 
-**Undo this step** (puts everything back, including each moved sign-up record back on its old account exactly as it was, and returns the old accounts to player search within a minute or so - except after the Season 15 test data has been cleared: then the tool refuses to undo and you tell Claude, see below). The apply printed a ready-to-copy `Undo:` line with the full backup path. It looks like this (put your backup's file name where it says so):
+**Undo this step** (puts everything back, including each moved sign-up record back on its old account exactly as it was, and returns the old accounts to player search within a minute or so - except once Season 15 is a live fantasy season again, that is after its fantasy settings are put back for the Season 16 start: then the tool refuses to undo and you tell Claude, see below). The apply printed a ready-to-copy `Undo:` line with the full backup path. It looks like this (put your backup's file name where it says so):
 
 ```bash
 npm run merge:accounts -- --undo "tools/rehearsal_out/<your merge_backup_ file name>.json"
@@ -161,7 +165,7 @@ npm run merge:accounts -- --undo "tools/rehearsal_out/<your merge_backup_ file n
 
 **If the merge took more than one apply run** (for example the first run stopped on a canary failure or skipped a person, and you applied again), each run saved its own backup. To undo everything, run the undo for **every** run's backup file, **newest first**, then the older ones. Use only files that start with `merge_backup_`, not the `fill_backup_` files in the same folder. The undo only puts back things nobody has touched since. If it prints `LEFT ALONE (changed since the merge)` for something, someone edited it after the merge; the tool refused to overwrite it. Ask Claude. A sign-up record whose old key was edited after the merge is left alone, and the copy on the kept account is left too (`LEFT ALONE ... (its old record changed since the merge)`), so the record is never lost. If an undo instead prints `Refusing --undo: This run was finished by a later run. Undo that later run's backup first, then undo this one.`, nothing was changed. That happens when a later run finished the move or its old record was removed by hand: undo the newer run's backup first, then this one again. If there is no newer `merge_backup_` file, tell Claude.
 
-**One more refusal, and the reason for the step 4 timing.** The undo cannot be used after the Season 15 test data has been cleared. It prints `Refusing --undo: a season in this backup now has live fantasy (the Season 15 test data was cleared). Undoing would change a live fantasy roster. Tell Claude.` and then `Nothing was changed.`, followed by the person and season it is about. Putting Parlevino's old Season 15 row back on a live fantasy season would change a real fantasy roster, so the tool refuses the whole undo and writes nothing, for anyone. If you see it, tell Claude. Don't put the test data back yourself.
+**One more refusal, and the reason for the step 4 timing.** The undo cannot be used while Season 15 has fantasy settings and no test marker. Since 2026-11-13 Season 15 has no fantasy settings at all, so this only happens after they are put back for the Season 16 fantasy start. It prints `Refusing --undo: a season in this backup now has live fantasy (the Season 15 test data was cleared). Undoing would change a live fantasy roster. Tell Claude.` and then `Nothing was changed.`, followed by the person and season it is about. Putting Parlevino's old Season 15 row back on a live fantasy season would change a real fantasy roster, so the tool refuses the whole undo and writes nothing, for anyone. If you see it, tell Claude. Don't put the test data back yourself.
 
 **A sign-up record that has moved since the merge.** If a person's sign-up record on the kept account was moved to the other status (Paid or NotPaid) after the merge, the undo leaves both of that person's records for that season alone and prints `LEFT ALONE ... (the kept account's record moved to NotPaid since the merge)` (or `Paid`). Tell Claude, so that nobody ends up with two records.
 

@@ -92,6 +92,7 @@ interface Slot {
   countedTenths: number;
   multiplier: number;
   autoSubbedIn: boolean;
+  replaces?: string;
 }
 
 function breakdownOf(
@@ -143,6 +144,8 @@ describe('scoreWeekCore pending rule', () => {
       { playerId: 'Vic', countedTenths: 25, multiplier: 1, autoSubbedIn: false });
     expect(slots['Paz'].countedTenths).toBe(0);
     expect(Object.values(slots).some((s) => s.autoSubbedIn)).toBe(false);
+    // The pending starter is not replaced: no row records a pairing.
+    expect(Object.values(slots).some((s) => 'replaces' in s)).toBe(false);
     expect(out.historyByUid['u']['TotalTenths']).toBe(380);
   });
 
@@ -163,8 +166,10 @@ describe('scoreWeekCore pending rule', () => {
       pendingTeams: ['Wolves'],
     }));
     const slots = breakdownOf(out, 'u');
-    expect(slots['Vic']).toEqual(
-      { playerId: 'Vic', countedTenths: 50, multiplier: 1, autoSubbedIn: true });
+    expect(slots['Vic']).toEqual({
+      playerId: 'Vic', countedTenths: 50, multiplier: 1, autoSubbedIn: true,
+      replaces: 'Paz',
+    });
     expect(out.historyByUid['u']['TotalTenths']).toBe(405);
   });
 
@@ -181,8 +186,10 @@ describe('scoreWeekCore pending rule', () => {
     }));
     const slots = breakdownOf(out, 'u');
     expect(slots['Bert'].countedTenths).toBe(0);
-    expect(slots['Vic']).toEqual(
-      { playerId: 'Vic', countedTenths: 50, multiplier: 1, autoSubbedIn: true });
+    expect(slots['Vic']).toEqual({
+      playerId: 'Vic', countedTenths: 50, multiplier: 1, autoSubbedIn: true,
+      replaces: 'Bert',
+    });
     expect(out.historyByUid['u']['TotalTenths']).toBe(405);
   });
 
@@ -291,8 +298,10 @@ describe('scoreWeekCore pending rule', () => {
         ], 'Leo', 'Lana'),
       },
     }));
-    expect(breakdownOf(out, 'u')['Vic']).toEqual(
-      { playerId: 'Vic', countedTenths: 50, multiplier: 1, autoSubbedIn: true });
+    expect(breakdownOf(out, 'u')['Vic']).toEqual({
+      playerId: 'Vic', countedTenths: 50, multiplier: 1, autoSubbedIn: true,
+      replaces: 'Nox',
+    });
     expect(out.historyByUid['u']['TotalTenths']).toBe(405);
   });
 

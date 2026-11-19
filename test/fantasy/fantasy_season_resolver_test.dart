@@ -9,6 +9,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_season_resolver.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 void main() {
   /// A fake `Fantasy/<sport>/<season>/Config` existence probe that records
@@ -230,6 +231,42 @@ void main() {
           contains('FantasySeasonResolver: Current League: no answer after'));
       expect(all, contains('FantasySeasonResolver: Futsal Season'));
       expect(all, contains('FantasySeasonResolver: Fantasy/Futsal/16/Config'));
+    });
+  });
+
+  // Fresh reads, Task 3 (#1): the Config existence probe is server-first. A
+  // Config that exists counts from any source; "no Config" only when the
+  // server said so — an unconfirmed "no Config" is a failed probe (not
+  // remembered), never a fall-back to an older season memoised all session.
+  group('configExistsFromRead', () {
+    test('a Config in the saved copy counts', () {
+      expect(
+          configExistsFromRead(const FreshValue({'lockHour': 9},
+              fromServer: false)),
+          isTrue);
+    });
+
+    test('"no Config" from the server is a real no', () {
+      expect(configExistsFromRead(const FreshValue(null, fromServer: true)),
+          isFalse);
+    });
+
+    test('an unconfirmed "no Config" throws (a failed probe)', () {
+      expect(() => configExistsFromRead(
+              const FreshValue(null, fromServer: false)),
+          throwsStateError);
+    });
+
+    test('...which resolves as failed, not as an older season', () async {
+      final r = await resolveFantasySeasonWith(
+        readSport: () async => 'Futsal',
+        readSeason: (_) async => '16',
+        hasConfig: (s, n) async => n == '16'
+            ? configExistsFromRead(const FreshValue(null, fromServer: false))
+            : true,
+      );
+      expect(r.failed, isTrue);
+      expect(r.season, isNull);
     });
   });
 }

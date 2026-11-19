@@ -13,6 +13,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_schedule_feed.dart';
 import 'package:infinite_sports_flutter/search_hub_page.dart';
 
 void main() {
@@ -85,6 +86,82 @@ void main() {
           .tap(find.byKey(const ValueKey('search_hub_fantasy_card')));
       await tester.pumpAndSettle();
       expect(find.text('stub hub Futsal 15'), findsOneWidget);
+    });
+    // Release report #16: the card said "Futsal Season 15 is live" after the
+    // season had ended. It now shares the home banner's season-over decision
+    // (FantasySeasonFinishedFeed on the league's Finished flag).
+    group('season over (release report #16)', () {
+      setUp(FantasySeasonFinishedFeed.clearSessionCache);
+
+      Future<StreamController<bool>> pumpHub(WidgetTester tester) async {
+        final gate = StreamController<(String, String)?>.broadcast();
+        final finished = StreamController<bool>.broadcast();
+        addTearDown(gate.close);
+        addTearDown(finished.close);
+        final asked = <String>[];
+        await tester.pumpWidget(MaterialApp(
+          home: SearchHubPage(
+            fantasyGateOverride: gate.stream,
+            fantasyFinishedStates: (sport, season) {
+              asked.add('$sport|$season');
+              return finished.stream;
+            },
+          ),
+        ));
+        await tester.pump();
+        gate.add(('Futsal', '15'));
+        await tester.pump();
+        expect(asked, ['Futsal|15']);
+        return finished;
+      }
+
+      testWidgets('waits for the flag (no live-then-over flip), then reads '
+          '"is over — see the final standings"', (tester) async {
+        final finished = await pumpHub(tester);
+        expect(find.text('Infinite Fantasy'), findsNothing);
+        finished.add(true);
+        await tester.pump();
+        expect(find.text('Infinite Fantasy'), findsOneWidget);
+        expect(
+            find.text('Futsal Season 15 is over — see the final standings'),
+            findsOneWidget);
+        expect(find.textContaining('is live'), findsNothing);
+      });
+
+      testWidgets('"is live" only while the season is running; the card '
+          'follows the flag live', (tester) async {
+        final finished = await pumpHub(tester);
+        finished.add(false);
+        await tester.pump();
+        expect(find.text('Pick your seven — Futsal Season 15 is live'),
+            findsOneWidget);
+        finished.add(true);
+        await tester.pump();
+        expect(
+            find.text('Futsal Season 15 is over — see the final standings'),
+            findsOneWidget);
+      });
+
+      testWidgets('a failed read is not a fact: neutral line (neither live '
+          'nor over), then the retry corrects it', (tester) async {
+        final finished = await pumpHub(tester);
+        finished.addError(StateError('offline'));
+        await tester.pump();
+        expect(find.text('Infinite Fantasy'), findsOneWidget);
+        expect(find.text('Futsal Season 15 · Open Infinite Fantasy'),
+            findsOneWidget);
+        expect(find.textContaining('is live'), findsNothing);
+        expect(find.textContaining('is over'), findsNothing);
+
+        // The feed re-subscribes after its back-off; the next answer lands.
+        await tester.pump(const Duration(seconds: 3));
+        finished.add(true);
+        await tester.pump();
+        await tester.pump();
+        expect(
+            find.text('Futsal Season 15 is over — see the final standings'),
+            findsOneWidget);
+      });
     });
   });
 }

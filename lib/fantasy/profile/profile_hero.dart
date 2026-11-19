@@ -14,7 +14,6 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder_logic.dart';
-import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_logic.dart';
 
 /// A stable per-team colour for teams whose jersey colour isn't set (the
 /// Teams node's optional `Color`): a hue hashed from the name at a mid-dark
@@ -56,10 +55,13 @@ class FantasyProfileHero extends StatelessWidget {
 
   String get _subtitle {
     final number = shirtNumber?.trim() ?? '';
-    final position =
-        '${positionLabel(player.position)}${number.isEmpty ? '' : ' #$number'}';
-    final team = player.teamName.trim();
-    return team.isEmpty ? position : '$team · $position';
+    // Opened from outside the hub too (a league game, a profile): the
+    // fantasy group is labelled so it can't pass for his playing position.
+    return [
+      if (player.teamName.trim().isNotEmpty) player.teamName.trim(),
+      if (number.isNotEmpty) '#$number',
+      player.position.fantasyTag,
+    ].join(' · ');
   }
 
   @override

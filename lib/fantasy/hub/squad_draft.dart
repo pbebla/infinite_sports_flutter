@@ -483,6 +483,64 @@ class SquadDraftController extends ChangeNotifier {
     return message;
   }
 
+  /// The filled slots [slot] can trade places with: same position, on the
+  /// other side of the bench line, in slot order. Empty for an empty slot
+  /// or a keeper (there is no bench keeper).
+  List<int> substituteCandidates(int slot) {
+    if (slot < 0 || slot >= _slots.length || _picks[slot] == null) return [];
+    return [
+      for (var i = 0; i < _slots.length; i++)
+        if (_picks[i] != null && _isSubstitutePair(slot, i)) i
+    ];
+  }
+
+  bool _isSubstitutePair(int a, int b) =>
+      a != b &&
+      a >= 0 &&
+      b >= 0 &&
+      a < _slots.length &&
+      b < _slots.length &&
+      _picks[a] != null &&
+      _picks[b] != null &&
+      _slots[a].position == _slots[b].position &&
+      _slots[a].bench != _slots[b].bench;
+
+  /// Swaps the picks in [slotA] and [slotB] (a starter and a bench player
+  /// of one position). Free and not a transfer: ids and prices are kept,
+  /// each pick just takes its new slot's bench flag. An armband on the
+  /// player leaving the pitch passes to the player coming on; returns the
+  /// sentence saying so (null when none passed). Throws [ArgumentError] for
+  /// anything but a valid pair.
+  String? substitute(int slotA, int slotB) {
+    if (!_isSubstitutePair(slotA, slotB)) {
+      throw ArgumentError(
+          'substitute: slots $slotA and $slotB are not a starter and a '
+          'bench player of the same position, both filled');
+    }
+    final a = _picks[slotA]!;
+    final b = _picks[slotB]!;
+    SquadPick moved(SquadPick p, int toSlot) => SquadPick(
+        playerId: p.playerId,
+        position: p.position,
+        priceTenths: p.priceTenths,
+        bench: _slots[toSlot].bench);
+    _picks[slotA] = moved(b, slotA);
+    _picks[slotB] = moved(a, slotB);
+    final benched = _slots[slotA].bench ? b : a; // the one who left the pitch
+    final incoming = identical(benched, a) ? b : a;
+    String? message;
+    if (benched.playerId == _captainId) {
+      _captainId = incoming.playerId;
+      message = '${incoming.playerId} is now your captain.';
+    } else if (benched.playerId == _viceId) {
+      _viceId = incoming.playerId;
+      message = '${incoming.playerId} is now your vice-captain.';
+    }
+    _dirty = true;
+    notifyListeners();
+    return message;
+  }
+
   /// Market add (P3c): lands in the first empty slot matching the player's
   /// position — starters fill before the bench (buildSlots order). False
   /// when no slot fits (the market disables the control first via

@@ -40,7 +40,15 @@ String stageDisplayName(String stage) {
   }
 }
 
-/// True for bracket placeholder names ('Winner of SF1', 'Loser of QF2') —
-/// these render with a neutral icon instead of a team-logo lookup.
+/// An ordinal seed placeholder ('3rd Place', '12th place '): the Manager
+/// puts it in a playoff slot until the regular season decides the team.
+final RegExp _seedPlacePattern =
+    RegExp(r'^\d{1,2}(st|nd|rd|th) Place$', caseSensitive: false);
+
+/// True for bracket placeholder names ('Winner of SF1', 'Loser of QF2',
+/// '3rd Place') — these render with a neutral icon instead of a team-logo
+/// lookup and open no team page. 'Park Place FC' is a real team.
 bool isPlaceholderTeam(String name) =>
-    name.startsWith('Winner of ') || name.startsWith('Loser of ');
+    name.startsWith('Winner of ') ||
+    name.startsWith('Loser of ') ||
+    _seedPlacePattern.hasMatch(name.trim());

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -15,8 +16,11 @@ import 'package:infinite_sports_flutter/misc/insider_service.dart';
 import 'package:infinite_sports_flutter/misc/notification_router.dart';
 import 'package:infinite_sports_flutter/misc/pushnotifications.dart';
 import 'package:infinite_sports_flutter/misc/rtdb_emulator.dart';
+import 'package:infinite_sports_flutter/misc/season_pointers.dart';
 import 'package:infinite_sports_flutter/misc/server_time.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
+import 'package:infinite_sports_flutter/misc/follow_store.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
@@ -30,10 +34,14 @@ import 'package:infinite_sports_flutter/navbar.dart';
 import 'package:infinite_sports_flutter/navigations/current_livescore_navigation.dart';
 import 'package:infinite_sports_flutter/navigations/leagues_navigation.dart';
 import 'package:infinite_sports_flutter/navigations/tournaments_navigation.dart';
+import 'package:infinite_sports_flutter/profile/profile_page.dart';
 import 'package:infinite_sports_flutter/search_hub_page.dart';
+import 'package:infinite_sports_flutter/update/store_update_check.dart';
+import 'package:infinite_sports_flutter/update/update_gate.dart';
 import 'package:infinite_sports_flutter/widgets/glass_nav_bar.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_options.dart';
@@ -61,9 +69,11 @@ Future<void> main() async {
     print("device token: $token");
   }
   );
+  // uploadToken writes nothing while Settings' "All notifications" is off.
   FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
-    if (signedIn) {
-      await uploadToken(FirebaseAuth.instance.currentUser!, newToken);
+    final user = FirebaseAuth.instance.currentUser;
+    if (signedIn && user != null) {
+      await uploadToken(user, newToken);
     }
   });
   FirebaseMessaging.onMessage.listen((message) {
@@ -94,11 +104,60 @@ Future<void> main() async {
   pendingLaunchMessage = await FirebaseMessaging.instance.getInitialMessage();
   SharedPreferences prefs = await SharedPreferences.getInstance();
   darkModeEnabled = resolveDarkModeDefault(prefs.getBool('darkMode'));
-  runApp(ChangeNotifierProvider(create: (context) => ThemeProvider(darkModeEnabled), child: const MyApp()));
+  // Part D (forced updates): a fan a store check already told to update
+  // sees the Update screen in the first frame. Both reads are on the phone
+  // (no network); the store check itself runs after the first frame.
+  String? cachedBlockedBuild;
+  try {
+    cachedBlockedBuild = prefs.getString(kBlockedBuildPrefKey);
+  } catch (_) {
+    cachedBlockedBuild = null; // unreadable: start unblocked (fails open)
+  }
+  final installedBuild = await _installedBuild();
+  runApp(
+    ChangeNotifierProvider(
+      create: (context) => ThemeProvider(darkModeEnabled),
+      child: MyApp(
+        updateChecker: _storeUpdateCheckerForThisPlatform(),
+        installedBuild: installedBuild,
+        cachedBlockedBuild: cachedBlockedBuild,
+      ),
+    ),
+  );
+}
+
+/// The installed `version+build` (e.g. `5.0.0+30`); empty if unreadable,
+/// which never starts the app blocked.
+Future<String> _installedBuild() async {
+  try {
+    final info = await PackageInfo.fromPlatform().timeout(
+      const Duration(seconds: 2),
+    );
+    return '${info.version}+${info.buildNumber}';
+  } catch (_) {
+    return '';
+  }
+}
+
+/// Google Play's in-app update check on Android, Apple's lookup on iPhone;
+/// any other platform never requires an update.
+StoreUpdateChecker _storeUpdateCheckerForThisPlatform() {
+  if (Platform.isIOS) return IosStoreUpdateChecker();
+  if (Platform.isAndroid) return AndroidStoreUpdateChecker();
+  return const NeverRequiredUpdateChecker();
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  const MyApp({
+    super.key,
+    required this.updateChecker,
+    required this.installedBuild,
+    this.cachedBlockedBuild,
+  });
+
+  final StoreUpdateChecker updateChecker;
+  final String installedBuild;
+  final String? cachedBlockedBuild;
 
   // This widget is the root of your application.
   @override
@@ -107,6 +166,15 @@ class MyApp extends StatelessWidget {
       title: 'Infinite Sports',
       theme: Provider.of<ThemeProvider>(context).themeData,
       home: const AuthGate(),
+      // Above the Navigator: while an update is required (and forced
+      // updates are not paused) the "Update required" screen covers the
+      // whole app, which stays mounted underneath (no taps, no semantics).
+      builder: (context, child) => UpdateGate(
+        checker: updateChecker,
+        installedBuild: installedBuild,
+        cachedBlockedBuild: cachedBlockedBuild,
+        child: child ?? const SizedBox.shrink(),
+      ),
     );
   }
 }
@@ -205,17 +273,18 @@ Future<void> _handleGoogleSignIn(BuildContext context) async {
   final user = credential.user;
   if (user == null) return;
 
-  var usersNodeExists = false;
+  // Fresh reads (Task 3, #6/#7): server-first. An existing node counts from
+  // any source; "missing" only when the server said so. Unknown (the saved
+  // copy said missing, or the read failed) leaves the decision to Firebase's
+  // own new-user flag, so a returning fan is never re-onboarded (nor their
+  // name re-written) on a stale or failed read — never a reason to block
+  // sign-in either.
+  bool? usersNodeExists;
   try {
-    final snap =
-        (await FirebaseDatabase.instance.ref('Users/${user.uid}').once())
-            .snapshot;
-    usersNodeExists = snap.exists;
+    usersNodeExists =
+        usersNodeFromRead(await serverFirstValue('Users/${user.uid}'));
   } catch (_) {
-    // Network hiccup reading the node: fall through with usersNodeExists
-    // false, which only means the (harmless, .update()-based) base-profile
-    // write below might redundantly re-run for an existing user — never a
-    // reason to block sign-in.
+    usersNodeExists = null;
   }
 
   final isNewUser = isNewSignInUser(
@@ -295,17 +364,18 @@ Future<void> _handleAppleSignIn(BuildContext context) async {
   final user = credential.user;
   if (user == null) return;
 
-  var usersNodeExists = false;
+  // Fresh reads (Task 3, #6/#7): server-first. An existing node counts from
+  // any source; "missing" only when the server said so. Unknown (the saved
+  // copy said missing, or the read failed) leaves the decision to Firebase's
+  // own new-user flag, so a returning fan is never re-onboarded (nor their
+  // name re-written) on a stale or failed read — never a reason to block
+  // sign-in either.
+  bool? usersNodeExists;
   try {
-    final snap =
-        (await FirebaseDatabase.instance.ref('Users/${user.uid}').once())
-            .snapshot;
-    usersNodeExists = snap.exists;
+    usersNodeExists =
+        usersNodeFromRead(await serverFirstValue('Users/${user.uid}'));
   } catch (_) {
-    // Network hiccup reading the node: fall through with usersNodeExists
-    // false, which only means the (harmless, .update()-based) base-profile
-    // write below might redundantly re-run for an existing user — never a
-    // reason to block sign-in.
+    usersNodeExists = null;
   }
 
   final isNewUser = isNewSignInUser(
@@ -418,12 +488,17 @@ class _MyHomePageState extends State<MyHomePage> {
     // shared requestedHomeTab notifier (lib/misc/utility.dart) instead of
     // inventing its own navigation.
     requestedHomeTab.addListener(_onRequestedHomeTab);
+    // A season pointer that moves (fresh-reads Task 2) changes which stint
+    // is "current" on every profile: the memoised careers are re-read on
+    // their next open.
+    SeasonPointers.listenable.addListener(ProfilePage.clearCareerCache);
     super.initState();
   }
 
   @override
   void dispose() {
     requestedHomeTab.removeListener(_onRequestedHomeTab);
+    SeasonPointers.listenable.removeListener(ProfilePage.clearCareerCache);
     super.dispose();
   }
 
@@ -457,16 +532,22 @@ class _MyHomePageState extends State<MyHomePage> {
       return;
     }
     final prefs = NotificationPrefs();
-    await prefs.subscribeAllUsers();
+    // The everyone topic stays off while "All notifications" is off.
+    await FollowStore()
+        .joinEveryoneTopicIfEnabled(subscribe: prefs.subscribeAllUsers);
     final user = FirebaseAuth.instance.currentUser;
     if (!signedIn || user == null) return;
     // A merged (old) account gets NEITHER prompt: the merged-account watcher
     // shows its notice and signs the person out (final-review fix 1).
+    // Both server-first checks start together (one barrier, one bound —
+    // fresh reads, Task 4); favoritesAnswered never throws.
+    final favorites = prefs.favoritesAnswered(user.uid);
     final gate = await _showAboutYouIfIncomplete(user.uid);
     if (!gate.showsFavorites) return;
-    if (await prefs.hasAnswered(user.uid)) return;
-    final answered = await prefs.serverFavorites(user.uid);
-    if (answered != null) return; // already has favorites recorded
+    // true = already answered; null = could not confirm "not answered" with
+    // the server (fresh reads, Task 3) — ask again next launch, never re-ask
+    // on a stale or failed read.
+    if (await favorites != false) return;
     final ctx = mainContext;
     if (ctx != null && mounted) {
       Navigator.push(ctx,
@@ -494,15 +575,20 @@ class _MyHomePageState extends State<MyHomePage> {
   /// neither page — the merged-account watcher handles it.
   Future<OnboardingGateDecision> _showAboutYouIfIncomplete(String uid) async {
     dynamic usersNode;
+    OnboardingGateDecision decision;
     try {
-      final snap =
-          (await FirebaseDatabase.instance.ref('Users/$uid').once()).snapshot;
-      usersNode = snap.value;
+      // Fresh reads (Task 3, #8): server-first. "Completed" and merged are
+      // trusted from any source; "not completed" only blocks the fan behind
+      // the mandatory page when the server said so — otherwise
+      // notCheckedYet: let them in, ask again next launch.
+      final read = await serverFirstValue('Users/$uid');
+      usersNode = read.value;
+      decision =
+          onboardingGateDecisionForRead(usersNode, fromServer: read.fromServer);
     } catch (_) {
       // network hiccup: don't block app entry over this check
       return OnboardingGateDecision.profileComplete;
     }
-    final decision = onboardingGateDecisionFor(usersNode);
     if (!decision.showsAboutYou) return decision;
     final ctx = mainContext;
     if (ctx == null || !ctx.mounted) return decision;
@@ -541,13 +627,22 @@ class _MyHomePageState extends State<MyHomePage> {
     if (FirebaseAuth.instance.currentUser != null) {
       signedIn = true;
       String? token = await FirebaseMessaging.instance.getToken();
-      if (token != null) {
-        await uploadToken(FirebaseAuth.instance.currentUser!, token);
+      // Re-read after the await (the person may have signed out); and
+      // uploadToken writes nothing while "All notifications" is off.
+      final user = FirebaseAuth.instance.currentUser;
+      if (token != null && user != null) {
+        await uploadToken(user, token);
       }
     }
     currentSport = await getCurrentSport();
     currentSeason = await getCurrentSeason(currentSport);
-    headerNotifier.value = [currentSport, currentSeason];
+    // Review fix m2: only a starting value. FrontPage owns the header and
+    // sets it from the same values its tabs were built from, so this never
+    // overrides a header that already agrees with the games on screen.
+    final header = headerNotifier.value as List;
+    if (header.every((v) => '$v'.isEmpty)) {
+      headerNotifier.value = [currentSport, currentSeason];
+    }
     await getAllTeamLogo();
     return 1;
   }

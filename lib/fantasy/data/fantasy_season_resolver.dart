@@ -12,8 +12,13 @@
 // `Fantasy/<sport>` would pull every season's squads and weekly records), so
 // step 2 probes the tiny `Config` nodes of the seasons just below the current
 // one, newest first, in small parallel batches — one extra read in the usual
-// "new season created, Fantasy not set up yet" case. `once()` reads only —
+// "new season created, Fantasy not set up yet" case. Live listeners only —
 // NEVER `.get()` (house rule; the Manager's guard test enforces it there).
+//
+// Fresh reads (plan 2026-11-13-fresh-reads.md): the pointers come from the
+// live season pointers (season_pointers.dart) and the Config probes are
+// server-first ([configExistsFromRead]), so a new season is found on the
+// first open after it starts, and the memo is dropped when a pointer moves.
 //
 // The answer is THREE-way ([FantasySeasonResolution]): a season, a real
 // "none", or an error. A failed read (a network blip, a permission hiccup)
@@ -31,11 +36,13 @@
 // test/fantasy/fantasy_season_resolver_test.dart); the Firebase readers in
 // [resolveFantasySeason] are not (repo convention).
 
-import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_badges.dart'
     show kFantasyReservedRootKeys;
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/misc/bounded_read.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
+import 'package:infinite_sports_flutter/misc/season_pointers.dart';
 
 /// A resolved fantasy season.
 typedef FantasySeasonKey = ({String sport, String season});
@@ -125,29 +132,51 @@ Future<FantasySeasonKey?> pickFantasySeason({
 
 FantasySeasonKey? _lastResolved;
 
-/// The last successfully resolved season this session (null before the first
-/// resolve) — lets a screen paint its first frame without waiting on the
-/// pointer reads (session-cache convention; not user-specific, so nothing to
-/// clear on sign-out).
-FantasySeasonKey? get lastResolvedFantasySeason => _lastResolved;
+/// [SeasonPointers.version] when [_lastResolved] was resolved.
+int _lastResolvedVersion = -1;
 
-Future<bool> _configExists(String sport, String season) async {
-  final snap = (await FirebaseDatabase.instance
-          .ref('Fantasy/$sport/$season/Config')
-          .once())
-      .snapshot;
-  // Same gate as FantasyService.watchConfig: absent/malformed = no fantasy.
-  return configStateFromNode(snap.value) != null;
+/// The last successfully resolved season this session (null before the first
+/// resolve, and again as soon as a season pointer changes — a new season
+/// must be resolved, not served from the memo) — lets a screen paint its
+/// first frame without waiting on the pointer reads (session-cache
+/// convention; not user-specific, so nothing to clear on sign-out).
+FantasySeasonKey? get lastResolvedFantasySeason =>
+    _lastResolvedVersion == SeasonPointers.version ? _lastResolved : null;
+
+/// Test seam: plants a memo as if resolved now.
+@visibleForTesting
+void debugSetLastResolvedFantasySeason(FantasySeasonKey? season) {
+  _lastResolved = season;
+  _lastResolvedVersion = SeasonPointers.version;
 }
 
-/// A top-level pointer node (`Current League`, `<Sport> Season`) — the same
-/// nodes frontpage.dart / the search hub read, but read here directly so a
-/// FAILED read throws instead of coming back as error text (utility.dart's
+/// Server-first (fresh reads, Task 3, #1): see [configExistsFromRead].
+Future<bool> _configExists(String sport, String season) async {
+  return configExistsFromRead(
+      await serverFirstValue('Fantasy/$sport/$season/Config'));
+}
+
+/// Whether a Config read says the season has fantasy — same gate as
+/// FantasyService.watchConfig (absent/malformed = no fantasy). A Config
+/// that exists counts from any source; "no Config" only when the server
+/// said so. An unconfirmed "no Config" (the phone's saved copy, e.g. a new
+/// season's Config the phone has never loaded) THROWS: the resolve fails
+/// and is retried on the next open, instead of falling back to an older
+/// season and memoising it for the session.
+bool configExistsFromRead(FreshValue read) {
+  final exists = configStateFromNode(read.value) != null;
+  if (exists || read.fromServer) return exists;
+  throw StateError('Fantasy Config not confirmed by the server');
+}
+
+/// A top-level pointer node (`Current League`, `<Sport> Season`) from the
+/// live season pointers (season_pointers.dart) — the same source
+/// frontpage.dart / the search hub read, but here a FAILED read throws
+/// instead of coming back as error text (utility.dart's
 /// getCurrentSport/getCurrentSeason swallow errors into the returned
 /// string, which would be indistinguishable from "no pointer"). '' = absent.
-Future<String> _readPointer(String path) async {
-  final snap = (await FirebaseDatabase.instance.ref(path).once()).snapshot;
-  return snap.value?.toString() ?? '';
+Future<String> readSeasonPointer(String path) async {
+  return (await SeasonPointers.read(path)) ?? '';
 }
 
 /// Pure three-way core: [readSport] / [readSeason] read the pointers (a
@@ -189,13 +218,17 @@ Future<FantasySeasonResolution> resolveFantasySeasonWith({
 /// error). Never throws. A found season is memoized
 /// ([lastResolvedFantasySeason]).
 Future<FantasySeasonResolution> resolveFantasySeason() async {
+  final version = SeasonPointers.version;
   final result = await resolveFantasySeasonWith(
-    readSport: () => _readPointer('Current League'),
-    readSeason: (sport) => _readPointer('$sport Season'),
+    readSport: () => readSeasonPointer(kCurrentLeaguePointer),
+    readSeason: (sport) => readSeasonPointer(seasonPointerPath(sport)),
     hasConfig: _configExists,
   );
   final season = result.season;
-  if (season != null) _lastResolved = season;
+  if (season != null) {
+    _lastResolved = season;
+    _lastResolvedVersion = version;
+  }
   return result;
 }
 

@@ -65,7 +65,7 @@ class MyTicketsPage extends StatefulWidget {
 }
 
 class _MyTicketsPageState extends State<MyTicketsPage> {
-  late final Stream<List<int>> _nums;
+  late Stream<List<int>> _nums;
 
   /// One stream per row, created lazily and KEPT — a stable identity means
   /// each row's StreamBuilder subscribes once instead of resubscribing on
@@ -77,9 +77,21 @@ class _MyTicketsPageState extends State<MyTicketsPage> {
     super.initState();
     // `??` short-circuits: when a test supplies ticketNumsStream,
     // FirebaseAuth.instance is never touched.
-    _nums = widget.ticketNumsStream ??
-        SupportService.watchMyTicketNums(
-            FirebaseAuth.instance.currentUser?.uid ?? '');
+    _nums = _freshNumsStream();
+  }
+
+  Stream<List<int>> _freshNumsStream() =>
+      widget.ticketNumsStream ??
+      SupportService.watchMyTicketNums(
+          FirebaseAuth.instance.currentUser?.uid ?? '');
+
+  /// Pull-to-refresh after a failed list read: a fresh subscription (an
+  /// errored onValue stream is finished).
+  Future<void> _refresh() async {
+    setState(() {
+      _nums = _freshNumsStream();
+      _rowStreams.clear();
+    });
   }
 
   Stream<SupportTicket?> _freshTicketStream(int num) =>
@@ -99,6 +111,7 @@ class _MyTicketsPageState extends State<MyTicketsPage> {
       body: StreamBuilder<List<int>>(
         stream: _nums,
         builder: (context, snapshot) {
+          if (snapshot.hasError) return _errorBody(context);
           final nums = snapshot.data;
           if (nums == null) {
             return Center(
@@ -119,6 +132,30 @@ class _MyTicketsPageState extends State<MyTicketsPage> {
             },
           );
         },
+      ),
+    );
+  }
+
+  /// A failed/denied read (session ended, permission denied) — never an
+  /// endless spinner. Scrollable so pull-to-refresh can retry.
+  Widget _errorBody(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return RefreshIndicator(
+      onRefresh: _refresh,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(32),
+        children: [
+          const SizedBox(height: 80),
+          Icon(Icons.cloud_off_outlined,
+              size: 56, color: scheme.onSurfaceVariant),
+          const SizedBox(height: 12),
+          Text(
+            "Couldn't load your tickets. Pull to refresh or try again later.",
+            textAlign: TextAlign.center,
+            style: TextStyle(color: scheme.onSurfaceVariant),
+          ),
+        ],
       ),
     );
   }
@@ -316,11 +353,20 @@ class _TicketThreadPageState extends State<TicketThreadPage> {
         child: StreamBuilder<SupportTicket?>(
           stream: _ticketStream,
           builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return _notice(
+                  context, "Couldn't load this ticket. Try again later.");
+            }
             final ticket = snapshot.data;
             if (ticket == null) {
-              return Center(
-                  child: CircularProgressIndicator(
-                      color: Theme.of(context).colorScheme.primary));
+              // Still loading vs. the stream answered "nothing here".
+              if (snapshot.connectionState == ConnectionState.waiting ||
+                  snapshot.connectionState == ConnectionState.none) {
+                return Center(
+                    child: CircularProgressIndicator(
+                        color: Theme.of(context).colorScheme.primary));
+              }
+              return _notice(context, 'This ticket is no longer available.');
             }
             return Column(
               children: [
@@ -329,6 +375,20 @@ class _TicketThreadPageState extends State<TicketThreadPage> {
               ],
             );
           },
+        ),
+      ),
+    );
+  }
+
+  Widget _notice(BuildContext context, String text) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Text(
+          text,
+          textAlign: TextAlign.center,
+          style:
+              TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
       ),
     );

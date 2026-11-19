@@ -56,6 +56,7 @@ import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/live_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
@@ -460,12 +461,14 @@ class _MatchFantasyTabState extends State<MatchFantasyTab> {
       open();
       return;
     }
-    // Same push as the league page's Fantasy entry card.
-    Navigator.push(
+    // Back to an already-open Hub for this season, else the same push as the
+    // league page's Fantasy entry card.
+    openFantasyHub(
       context,
-      MaterialPageRoute(
-        builder: (_) =>
-            FantasyHubPage(sport: widget.sport, season: widget.season),
+      FantasyHubRoute(
+        sport: widget.sport,
+        season: widget.season,
+        initialTab: FantasyHubTab.myTeam,
       ),
     );
   }
@@ -847,7 +850,7 @@ class _PointsRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${row.name} (${row.position.db})',
+                  '${row.name} (${row.position.fantasyTag})',
                   // Wraps, never underlined or ellipsized (house rules).
                   softWrap: true,
                   style: TextStyle(

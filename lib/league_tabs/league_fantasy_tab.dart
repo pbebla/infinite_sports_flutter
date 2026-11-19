@@ -6,6 +6,7 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
 
 class LeagueFantasyTab extends StatelessWidget {
   const LeagueFantasyTab({
@@ -18,15 +19,15 @@ class LeagueFantasyTab extends StatelessWidget {
   final String sport;
   final String season;
 
-  /// Test seam — production leaves it null and pushes the hub.
+  /// Test seam — production leaves it null and goes through [openFantasyHub]
+  /// (back to an open Hub for this season, else pushes one).
   final VoidCallback? onEnter;
 
   void _openHub(BuildContext context) {
-    Navigator.push(
+    openFantasyHub(
       context,
-      MaterialPageRoute(
-        builder: (_) => FantasyHubPage(sport: sport, season: season),
-      ),
+      FantasyHubRoute(
+          sport: sport, season: season, initialTab: FantasyHubTab.myTeam),
     );
   }
 
@@ -62,7 +63,7 @@ class LeagueFantasyTab extends StatelessWidget {
         _FeatureRow(
           icon: Icons.groups,
           title: 'Build your seven',
-          body: 'One keeper, two defenders, two attackers and a two-player '
+          body: 'One goalkeeper, two defenders, two attackers and a two-player '
               'bench — all within budget.',
           scheme: scheme,
         ),

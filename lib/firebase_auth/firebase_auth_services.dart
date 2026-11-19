@@ -92,6 +92,19 @@ ReauthFailureReason reauthUnavailableReason(
 OAuthCredential appleReauthCredential(String? identityToken) =>
     OAuthProvider('apple.com').credential(idToken: identityToken);
 
+/// Outcome of [FirebaseAuthService.deleteFreshAccount].
+enum FreshAccountDeletion {
+  /// The account is gone.
+  deleted,
+
+  /// The server refused, timed out or could not be reached: the account is
+  /// still there (the person is told how to ask for its removal).
+  notDeleted,
+
+  /// Nobody was signed in: nothing was attempted (no message to show).
+  nothingToRemove,
+}
+
 class FirebaseAuthService {
 
   Future<User?> signUpWithEmailAndPassword(String email, String password) async {
@@ -275,16 +288,26 @@ class FirebaseAuthService {
     }
   }
 
-  /// Deletes an account created moments ago (the under-13 exit on the About
-  /// You signup step): Apple's token is revoked first (iOS, Apple accounts),
-  /// then the `deleteAccount` callable removes the data and the Auth user.
-  /// The sign-in is only minutes old, so no password or Google re-auth is
-  /// needed. Never throws: every failure is logged, and the caller signs the
-  /// person out regardless.
-  Future<void> deleteFreshAccount() async {
+  /// Deletes a recently created account (the under-13 exit on About You):
+  /// Apple's token is revoked first (iOS, Apple accounts), then the
+  /// `deleteAccount` callable removes the data and the Auth user. No
+  /// password or Google re-auth: the server skips the recent-sign-in
+  /// requirement for an incomplete profile created in the last 7 days.
+  ///
+  /// Never throws, and is bounded (callable [_freshDeleteTimeout], reload
+  /// [_reloadTimeout]) because the About You page waits behind a blocking
+  /// progress state. A failure whose answer may have been lost after the
+  /// server already deleted the account is re-checked with a reload
+  /// (`user-not-found` / `user-disabled` = gone).
+  Future<FreshAccountDeletion> deleteFreshAccount() async {
+    final User? user;
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
+      user = FirebaseAuth.instance.currentUser;
+    } catch (_) {
+      return FreshAccountDeletion.nothingToRemove;
+    }
+    if (user == null) return FreshAccountDeletion.nothingToRemove;
+    try {
       if (Platform.isIOS &&
           user.providerData.any((p) => p.providerId == 'apple.com')) {
         try {
@@ -296,13 +319,35 @@ class FirebaseAuthService {
         }
       }
       await FirebaseFunctions.instance
-          .httpsCallable('deleteAccount')
-          .call<Object?>();
+          .httpsCallable('deleteAccount',
+              options: HttpsCallableOptions(timeout: _freshDeleteTimeout))
+          .call<Object?>()
+          // Belt and braces: the SDK option above is the real bound.
+          .timeout(_freshDeleteTimeout + const Duration(seconds: 5));
+      return FreshAccountDeletion.deleted;
     } catch (e) {
-      debugPrint('Fresh-account deletion failed: '
-          '${e is FirebaseFunctionsException ? e.code : e.runtimeType}');
+      final details = e is FirebaseFunctionsException ? e.details : null;
+      final detailCode = details is Map ? details['code'] : null;
+      final what = e is FirebaseFunctionsException
+          ? '${e.code}/$detailCode'
+          : '${e.runtimeType}';
+      debugPrint('Fresh-account deletion failed: $what');
     }
+    try {
+      await user.reload().timeout(_reloadTimeout);
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'user-not-found' || e.code == 'user-disabled') {
+        return FreshAccountDeletion.deleted;
+      }
+    } catch (_) {
+      // Unknown (offline, timed out): treat as still there; the person is
+      // told to email us.
+    }
+    return FreshAccountDeletion.notDeleted;
   }
+
+  static const _freshDeleteTimeout = Duration(seconds: 20);
+  static const _reloadTimeout = Duration(seconds: 5);
 
   /// A new Apple ID credential (the Apple sheet). Throws [ReauthCancelled]
   /// when the person closes it.

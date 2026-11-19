@@ -63,6 +63,7 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/collapsing_tab_shell.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/dream_team_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_share.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
@@ -74,6 +75,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/misc/public_profiles.dart';
 import 'package:infinite_sports_flutter/misc/share_card_service.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 enum LeaderboardScope { overall, gameweek, teamOfWeek, leagues }
 
@@ -217,6 +219,12 @@ class FantasyLeaderboardsTab extends StatefulWidget {
   /// stream — names/photos only; an empty result retries on next mount).
   static Future<Map<String, PublicProfile>>? profilesSession;
 
+  /// Fresh reads (Task 4, survey list B): a newer PublicProfiles mirror from
+  /// the server drops [profilesSession] (the next mount re-reads the renewed
+  /// saved copy). App lifetime; started by the first load (lazy static).
+  static final VoidCallback profilesSessionFollow = FreshReads.onNewer(
+      'PublicProfiles', (_) => FantasyLeaderboardsTab.profilesSession = null);
+
   @override
   State<FantasyLeaderboardsTab> createState() => _FantasyLeaderboardsTabState();
 }
@@ -260,15 +268,48 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
     }
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _boardsSub = (widget.leaderboardsStates ??
+  /// The tab is on screen (CollapsingTabShell.isTabOnScreen; true outside
+  /// the hub). While hidden, the two large / live-merged feeds — the whole
+  /// Leaderboards node and the Team of the Week, both re-merged with the live
+  /// gameweek on every live update — are dropped; the rows on screen stay
+  /// and the service's session cache answers at once on return (review 6,
+  /// M-b). Managers, mini-leagues and badges are small and rarely change.
+  bool _onScreen = true;
+
+  void _subscribeLiveFeeds() {
+    _boardsSub ??= (widget.leaderboardsStates ??
             FantasyService.watchLeaderboards(widget.sport, widget.season))
         .listen((boards) {
       if (mounted) setState(() => _boards = boards);
       _boardsForViewer.add(boards);
     });
+    _dreamTeamsSub ??= (widget.dreamTeamsStates ??
+            FantasyService.watchDreamTeams(widget.sport, widget.season))
+        .listen((teams) {
+      if (mounted) setState(() => _dreamTeams = teams);
+    });
+  }
+
+  void _dropLiveFeeds() {
+    _boardsSub?.cancel();
+    _boardsSub = null;
+    _dreamTeamsSub?.cancel();
+    _dreamTeamsSub = null;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final on = CollapsingTabShell.isTabOnScreen(context);
+    if (on == _onScreen) return;
+    _onScreen = on;
+    on ? _subscribeLiveFeeds() : _dropLiveFeeds();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _subscribeLiveFeeds();
     _managersSub = (widget.managersStates ??
             FantasyService.watchManagers(widget.sport, widget.season))
         .listen((managers) {
@@ -281,11 +322,6 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
         if (mounted) setState(() => _leagues = leagues);
       });
     }
-    _dreamTeamsSub = (widget.dreamTeamsStates ??
-            FantasyService.watchDreamTeams(widget.sport, widget.season))
-        .listen((teams) {
-      if (mounted) setState(() => _dreamTeams = teams);
-    });
     try {
       _badgesSub = (widget.badgesStates ??
               FantasyService.watchBadges(widget.sport, widget.season))
@@ -322,6 +358,7 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
     if (load != null) {
       profiles = await load();
     } else {
+      FantasyLeaderboardsTab.profilesSessionFollow;
       final future =
           FantasyLeaderboardsTab.profilesSession ??= PublicProfiles.getAllOnce();
       profiles = await future;

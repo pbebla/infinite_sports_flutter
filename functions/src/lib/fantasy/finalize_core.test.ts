@@ -349,8 +349,24 @@ describe('computeGameweekFinalize over the golden gameweek', () => {
       { playerId: 'Ezra', countedTenths: 0, multiplier: 1, autoSubbedIn: false },
       { playerId: 'Alex', countedTenths: 240, multiplier: 2, autoSubbedIn: false },
       { playerId: 'Will', countedTenths: -20, multiplier: 1, autoSubbedIn: false },
-      { playerId: 'Wren', countedTenths: 30, multiplier: 1, autoSubbedIn: true },
+      {
+        playerId: 'Wren', countedTenths: 30, multiplier: 1, autoSubbedIn: true,
+        replaces: 'Ezra',
+      },
     ]);
+    // `replaces` is written only on the bench player who came on.
+    const withReplaces = (alpha['Breakdown'] as Record<string, unknown>[])
+      .filter((r) => 'replaces' in r).map((r) => r['playerId']);
+    expect(withReplaces).toEqual(['Wren']);
+    // churn: Ezra starts and is absent -> bench ATT Wren covers him.
+    const churn = out.historyByUid['churn']['Breakdown'] as
+      Record<string, unknown>[];
+    expect(churn.filter((r) => 'replaces' in r)).toEqual([
+      expect.objectContaining({ playerId: 'Wren', replaces: 'Ezra' }),
+    ]);
+    // boost: every starter played -> no pairing.
+    expect((out.historyByUid['boost']['Breakdown'] as Record<string, unknown>[])
+      .some((r) => 'replaces' in r)).toBe(false);
   });
 
   it('gameweek board: whole net points, competition ranks', () => {
@@ -555,7 +571,10 @@ describe('computeGameweekFinalize edges', () => {
       { playerId: 'Ezra', countedTenths: 0, multiplier: 1, autoSubbedIn: false },
       { playerId: 'Alex', countedTenths: 240, multiplier: 2, autoSubbedIn: false },
       { playerId: 'Will', countedTenths: -20, multiplier: 1, autoSubbedIn: false },
-      { playerId: 'Wren', countedTenths: 30, multiplier: 1, autoSubbedIn: true },
+      {
+        playerId: 'Wren', countedTenths: 30, multiplier: 1, autoSubbedIn: true,
+        replaces: 'Ezra',
+      },
     ]);
     expect(out.gameweekBoard).toEqual({
       alpha: { points: 0, rank: 1 },

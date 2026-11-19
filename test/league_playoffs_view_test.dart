@@ -126,4 +126,77 @@ void main() {
       expect(leagueBracketMatches(playoffs, matches).length, 1);
     });
   });
+
+  // S16 Task 3: the live Futsal/16/Playoffs node (do not change data) —
+  // 6 teams, 1st and 2nd skip the quarterfinals.
+  group('Season 16 wiring (winnerTo → feeders)', () {
+    final s16 = {
+      'Format': 8,
+      'ThirdPlace': false,
+      'Slots': {
+        'qf1': {'team1Seed': 3, 'team2Seed': 6, 'gameRef': {'date': '01312027', 'index': 1}, 'winnerTo': 'sf1'},
+        'qf2': {'team1Seed': 4, 'team2Seed': 5, 'gameRef': {'date': '01312027', 'index': 2}, 'winnerTo': 'sf2'},
+        'sf1': {'team2Seed': 2, 'gameRef': {'date': '02072027', 'index': 0}, 'winnerTo': 'f1'},
+        'sf2': {'team2Seed': 1, 'gameRef': {'date': '02072027', 'index': 1}, 'winnerTo': 'f1'},
+        'f1': {'gameRef': {'date': '02142027', 'index': 0}},
+      },
+    };
+
+    test('slots expose winnerTo (\'\' when absent)', () {
+      final p = LeaguePlayoffs.fromNode(s16)!;
+      final byKey = {for (final s in p.slots) s.key: s};
+      expect(byKey['qf1']!.winnerTo, 'sf1');
+      expect(byKey['sf2']!.winnerTo, 'f1');
+      expect(byKey['f1']!.winnerTo, '');
+    });
+
+    test('feeders map each game to the games whose winners feed it', () {
+      final feeders = leagueBracketFeeders(LeaguePlayoffs.fromNode(s16));
+      expect(feeders, {
+        leagueGameId('02072027', 0): [leagueGameId('01312027', 1)],
+        leagueGameId('02072027', 1): [leagueGameId('01312027', 2)],
+        leagueGameId('02142027', 0): [
+          leagueGameId('02072027', 0),
+          leagueGameId('02072027', 1),
+        ],
+      });
+    });
+
+    test('feeders are ordered by the feeding slot\'s position', () {
+      final feeders = leagueBracketFeeders(LeaguePlayoffs.fromNode({
+        'Slots': {
+          'sf2': {'gameRef': {'date': '1', 'index': 1}, 'winnerTo': 'f1'},
+          'sf1': {'gameRef': {'date': '1', 'index': 0}, 'winnerTo': 'f1'},
+          'f1': {'gameRef': {'date': '2', 'index': 0}},
+        },
+      }));
+      expect(feeders![leagueGameId('2', 0)],
+          [leagueGameId('1', 0), leagueGameId('1', 1)]);
+    });
+
+    test('no playoffs, or no winnerTo wiring at all → null (index pairing)',
+        () {
+      expect(leagueBracketFeeders(null), isNull);
+      expect(
+          leagueBracketFeeders(LeaguePlayoffs.fromNode({
+            'Slots': {
+              'sf1': {'gameRef': {'date': '1', 'index': 0}},
+              'f1': {'gameRef': {'date': '2', 'index': 0}},
+            },
+          })),
+          isNull);
+    });
+
+    test('a winnerTo pointing at a missing slot or a slot without a gameRef '
+        'is skipped', () {
+      final feeders = leagueBracketFeeders(LeaguePlayoffs.fromNode({
+        'Slots': {
+          'qf1': {'gameRef': {'date': '1', 'index': 0}, 'winnerTo': 'sf9'},
+          'qf2': {'gameRef': {'date': '1', 'index': 1}, 'winnerTo': 'sf1'},
+          'sf1': {'winnerTo': 'f1'},
+        },
+      }));
+      expect(feeders, isNull);
+    });
+  });
 }

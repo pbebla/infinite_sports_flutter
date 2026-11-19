@@ -76,6 +76,7 @@ dependencies:
   google_sign_in: ^6.2.1
   sign_in_with_apple: ^8.1.0
   package_info_plus: ^8.1.0
+  in_app_update: ^4.2.5
 
 dev_dependencies:
   flutter_test:

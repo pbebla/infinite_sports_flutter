@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  counterUpdates, decideOnPaidFlip, effectiveCharge, maintenanceDecision, notificationFor,
+  counterUpdates, creditChange, decideOnPaidFlip, effectiveCharge, isReferralCredited, maintenanceDecision, notificationFor,
   tierDiscountPct, tierForStanding, tierName,
 } from '../src/lib/insiders';
 
@@ -497,5 +497,49 @@ describe('notificationFor — maintenance events', () => {
     expect(n.title.length).toBeGreaterThan(0);
     expect(n.body).toContain('Platinum');
     expect(n.body).toContain('2');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Referral credit and No charge
+// ---------------------------------------------------------------------------
+
+describe('referral credit and No charge', () => {
+  it('isReferralCredited is true for a paid, non-no-charge submission', () => {
+    expect(isReferralCredited({ Paid: true, PaidVia: 'venmo' })).toBe(true);
+    expect(isReferralCredited({ Paid: true })).toBe(true);
+  });
+
+  it('isReferralCredited is false for No charge, however it is typed', () => {
+    expect(isReferralCredited({ Paid: true, PaidVia: 'no charge' })).toBe(false);
+    expect(isReferralCredited({ Paid: true, PaidVia: ' No Charge ' })).toBe(false);
+  });
+
+  it('isReferralCredited is false when not paid', () => {
+    expect(isReferralCredited({ Paid: false, PaidVia: 'venmo' })).toBe(false);
+  });
+
+  it('creditChange voids when a paid registration is switched to No charge', () => {
+    expect(creditChange({ Paid: true, PaidVia: 'venmo' }, { Paid: true, PaidVia: 'no charge' })).toBe('void');
+  });
+
+  it('creditChange counts when No charge is switched to a real method', () => {
+    expect(creditChange({ Paid: true, PaidVia: 'no charge' }, { Paid: true, PaidVia: 'zelle' })).toBe('count');
+  });
+
+  it('creditChange ignores No charge going on and off Paid', () => {
+    expect(creditChange({ Paid: false, PaidVia: 'no charge' }, { Paid: true, PaidVia: 'no charge' })).toBeNull();
+    expect(creditChange({ Paid: true, PaidVia: 'no charge' }, { Paid: false, PaidVia: 'no charge' })).toBeNull();
+  });
+
+  it('creditChange keeps the old behavior for a plain paid flip', () => {
+    expect(creditChange({}, { Paid: true, PaidVia: 'team code' })).toBe('count');
+  });
+
+  it('creditChange ignores a change of amount only', () => {
+    expect(creditChange(
+      { Paid: true, PaidVia: 'cash', PaidAmount: 50 },
+      { Paid: true, PaidVia: 'cash', PaidAmount: 80 },
+    )).toBeNull();
   });
 });

@@ -165,6 +165,15 @@ void main() {
       expect(promoted,
           unorderedEquals((exp['autoSubbedIn'] as List).cast<String>()),
           reason: '$name auto-subs');
+      // Which starter each auto-sub covered (only on the promoted slot).
+      expect(
+        {
+          for (final slot in result.slots)
+            if (slot.replacesId != null) slot.playerId: slot.replacesId,
+        },
+        (exp['replaces'] as Map).cast<String, String>(),
+        reason: '$name replaces',
+      );
     }
   });
 }

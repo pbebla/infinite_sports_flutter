@@ -8,6 +8,8 @@
 /// pair already used by Google.
 library;
 
+import 'package:infinite_sports_flutter/misc/fresh_read.dart' show FreshValue;
+
 /// Splits a Google account's `displayName` into a first/last name pair for
 /// the base profile write, matching the shape `createDatabaseLocation`
 /// (lib/misc/utility.dart) writes for email signups ('First Name' / 'Last
@@ -32,11 +34,24 @@ library;
 /// — as a defensive fallback, since a `Users/<uid>` node genuinely missing
 /// is the thing that actually matters to this app — the RTDB node not
 /// existing yet.
+///
+/// [usersNodeExists] null = unknown (fresh reads, Task 3: the phone's saved
+/// copy said "missing", or the read failed — see [usersNodeFromRead]): only
+/// Firebase's own flag decides then, so a returning fan is never re-onboarded
+/// (and never has the base profile re-written) on a stale or failed read.
 bool isNewSignInUser({
   required bool isNewUserFlag,
-  required bool usersNodeExists,
+  required bool? usersNodeExists,
 }) {
-  return isNewUserFlag || !usersNodeExists;
+  return isNewUserFlag || usersNodeExists == false;
+}
+
+/// Whether `Users/<uid>` exists, from a read that may not come from the
+/// server: true when there is a node (any source), false only when the
+/// server said it is missing, null when that could not be confirmed.
+bool? usersNodeFromRead(FreshValue read) {
+  if (read.value != null) return true;
+  return read.fromServer ? false : null;
 }
 
 /// Combines an Apple ID credential's `givenName`/`familyName` (auth-wall D1)

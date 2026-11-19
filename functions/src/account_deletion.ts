@@ -8,7 +8,9 @@
 //   -> { deleted, anonymised, handoffs, storageDeleted, pendingStorage }
 //      counts only; never a path or a uid.
 //   Errors: unauthenticated / failed-precondition (details.code
-//   'recent-login-required' when auth_time is older than 5 minutes;
+//   'recent-login-required' when auth_time is older than 5 minutes, unless
+//   the account is brand new and never finished its profile (see
+//   isNewIncompleteAccount: the under-13 exit must work without a re-login);
 //   'already-merged' + keepHint for the old account of a merge) / internal
 //   ('deletion-incomplete' when a database step failed - nothing is
 //   stamped and the Auth user stays so a retry finishes it;
@@ -45,6 +47,8 @@ import {
 
 /** How fresh the sign-in must be: the bar Firebase sets for client deletes. */
 const RECENT_LOGIN_MS = 5 * 60 * 1000;
+/** How new an account with an unfinished profile must be to skip that bar. */
+const NEW_ACCOUNT_MS = 7 * 24 * 60 * 60 * 1000;
 const ADMIN_UID_RE = /^[A-Za-z0-9_-]{8,128}$/;
 const MAX_REASON = 200;
 
@@ -137,10 +141,39 @@ async function deleteAccountFor(
   };
 }
 
-function requireRecentLogin(request: CallableRequest): void {
+/** True only when ALL hold: Users/<uid>/ProfileCompleted is not true, there
+ *  is no Users/<uid>/MergedFrom (not the kept account of a combine), AND
+ *  the Auth user was created within the last 7 days. Such an account (the
+ *  under-13 exit right after sign-up) may delete itself without a fresh
+ *  sign-in. Any doubt - a gone Auth user, an unreadable creation time, a
+ *  failed read - answers false, so the recent-login rule applies as before. */
+async function isNewIncompleteAccount(uid: string): Promise<boolean> {
+  try {
+    const completed = (await admin.database().ref(`Users/${uid}/ProfileCompleted`).get()).val();
+    if (completed === true) return false;
+    // A KEPT account of a combine never qualifies: its deletion cascades to
+    // the old accounts combined into it (C1).
+    const mergedFrom = (await admin.database().ref(`Users/${uid}/MergedFrom`).get()).val();
+    if (mergedFrom !== null && mergedFrom !== undefined) return false;
+    const user = await getAuth().getUser(uid);
+    const created = Date.parse(String(user.metadata?.creationTime ?? ''));
+    if (!Number.isFinite(created)) return false;
+    const age = Date.now() - created;
+    return age >= 0 && age <= NEW_ACCOUNT_MS;
+  } catch (err) {
+    if (authErrorCode(err) !== 'auth/user-not-found') {
+      logger.warn('account deletion: new-account check failed; recent login required', {
+        code: authErrorCode(err),
+      });
+    }
+    return false;
+  }
+}
+
+async function requireRecentLogin(request: CallableRequest, uid: string): Promise<void> {
   const authTime = request.auth?.token?.['auth_time'];
   const ok = typeof authTime === 'number' && Date.now() - authTime * 1000 <= RECENT_LOGIN_MS;
-  if (!ok) {
+  if (!ok && !(await isNewIncompleteAccount(uid))) {
     throw new HttpsError('failed-precondition', 'recent-login-required', {
       code: 'recent-login-required',
     });
@@ -150,7 +183,7 @@ function requireRecentLogin(request: CallableRequest): void {
 export const deleteAccount = onCall(async (request): Promise<DeletionResult> => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in first.', { code: 'unauthenticated' });
-  requireRecentLogin(request);
+  await requireRecentLogin(request, uid);
   const provider = request.auth?.token?.firebase?.sign_in_provider;
   return deleteAccountFor(uid, {
     nowMs: Date.now(),
